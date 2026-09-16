@@ -249,12 +249,44 @@ export interface Dungeon {
   start: { x: number; y: number; dir: number };
   lights?: TorchLight[];
   sky?: SkyLight[];
+  decor?: Decor[];
 }
 
-export const TILE_WALL = 1;
 export const TILE_FLOOR = 0;
+export const TILE_WALL = 1;
 export const TILE_CHEST = 2;
 export const TILE_STAIRS = 3;
+export const TILE_BARS = 4;
+export const TILE_DOOR = 5;
+export const TILE_KEY = 6;
+
+/** Tiles that block movement (and sight beyond, except bars which see through). */
+export function isSolid(t: number): boolean {
+  return t === TILE_WALL || t === TILE_BARS || t === TILE_DOOR;
+}
+
+export type DecorKind =
+  | "brazier"
+  | "map"
+  | "fountain"
+  | "table"
+  | "gargoyle"
+  | "skeleton"
+  | "rat";
+
+/** Decorative prop. For wall-mounted kinds, (x,y) is the wall cell and
+ *  (dx,dy) points from the wall into the open room. */
+export interface Decor {
+  kind: DecorKind;
+  x: number;
+  y: number;
+  dx: number;
+  dy: number;
+}
+
+/** Kinds the player cannot walk through (placed only in open rooms). */
+export const DECOR_BLOCKS: ReadonlySet<DecorKind> = new Set<DecorKind>(["fountain", "table", "gargoyle"]);
+
 
 /**
  * Scatter torches along wall faces and cut a few daylight shafts in the
@@ -264,7 +296,7 @@ export const TILE_STAIRS = 3;
 export function addAmbiance(d: Dungeon, seed = 1): void {
   const rng = mulberry32(seed >>> 0);
   const isFloor = (x: number, y: number): boolean =>
-    x >= 0 && y >= 0 && x < d.w && y < d.h && d.tiles[y * d.w + x] !== TILE_WALL;
+    x >= 0 && y >= 0 && x < d.w && y < d.h && !isSolid(d.tiles[y * d.w + x]);
 
   const lights: TorchLight[] = [];
   for (let y = 1; y < d.h - 1; y++) {
@@ -312,8 +344,8 @@ export function addAmbiance(d: Dungeon, seed = 1): void {
 }
 
 export function generateDungeon(seed: number): Dungeon {
-  const w = 29;
-  const h = 29;
+  const w = 33;
+  const h = 33;
   const tiles = new Uint8Array(w * h).fill(TILE_WALL);
   const rng = mulberry32(seed);
   const ri = (n: number) => Math.floor(rng() * n);
@@ -321,39 +353,253 @@ export function generateDungeon(seed: number): Dungeon {
     if (x > 0 && y > 0 && x < w - 1 && y < h - 1) tiles[y * w + x] = TILE_FLOOR;
   };
 
-  const rooms: { cx: number; cy: number }[] = [];
-  let prev: { cx: number; cy: number } | null = null;
-
-  for (let i = 0; i < 11; i++) {
-    const rw = 3 + ri(4);
-    const rh = 3 + ri(4);
-    const rx = 1 + ri(w - rw - 2);
-    const ry = 1 + ri(h - rh - 2);
-    for (let y = ry; y < ry + rh; y++) for (let x = rx; x < rx + rw; x++) carve(x, y);
-    const c = { cx: Math.floor(rx + rw / 2), cy: Math.floor(ry + rh / 2) };
-    if (prev) {
-      for (let x = Math.min(prev.cx, c.cx); x <= Math.max(prev.cx, c.cx); x++) carve(x, prev.cy);
-      for (let y = Math.min(prev.cy, c.cy); y <= Math.max(prev.cy, c.cy); y++) carve(c.cx, y);
+  interface Room {
+    x: number;
+    y: number;
+    w: number;
+    h: number;
+    cx: number;
+    cy: number;
+  }
+  const rooms: Room[] = [];
+  for (let i = 0; i < 12; i++) {
+    for (let tries = 0; tries < 40; tries++) {
+      const rw = 4 + ri(5);
+      const rh = 4 + ri(5);
+      const rx = 1 + ri(w - rw - 2);
+      const ry = 1 + ri(h - rh - 2);
+      let ok = true;
+      for (const r of rooms) {
+        if (rx - 2 < r.x + r.w && rx + rw + 2 > r.x && ry - 2 < r.y + r.h && ry + rh + 2 > r.y) {
+          ok = false;
+          break;
+        }
+      }
+      if (!ok) continue;
+      for (let y = ry; y < ry + rh; y++) for (let x = rx; x < rx + rw; x++) carve(x, y);
+      rooms.push({ x: rx, y: ry, w: rw, h: rh, cx: Math.floor(rx + rw / 2), cy: Math.floor(ry + rh / 2) });
+      break;
     }
-    rooms.push(c);
-    prev = c;
+  }
+  const inAnyRoom = (x: number, y: number): boolean =>
+    rooms.some((r) => x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+
+  const connections: number[][] = [];
+  const connect = (a: Room, b: Room) => {
+    const path: number[] = [];
+    let x = a.cx;
+    let y = a.cy;
+    const wx = 2 + ri(w - 4);
+    const wy = 2 + ri(h - 4);
+    const leg = (tx: number, ty: number) => {
+      while (x !== tx) {
+        x += Math.sign(tx - x);
+        carve(x, y);
+        path.push(y * w + x);
+      }
+      while (y !== ty) {
+        y += Math.sign(ty - y);
+        carve(x, y);
+        path.push(y * w + x);
+      }
+    };
+    leg(wx, a.cy);
+    leg(wx, wy);
+    leg(b.cx, wy);
+    leg(b.cx, b.cy);
+    connections.push(path);
+  };
+  for (let i = 1; i < rooms.length; i++) connect(rooms[i - 1], rooms[i]);
+  for (let i = 0; i < 2 && rooms.length > 4; i++) {
+    const a = rooms[ri(rooms.length)];
+    const b = rooms[ri(rooms.length)];
+    if (a !== b) connect(a, b);
   }
 
   const startRoom = rooms[0];
   const start = { x: startRoom.cx, y: startRoom.cy, dir: 1 };
-
   const last = rooms[rooms.length - 1];
   tiles[last.cy * w + last.cx] = TILE_STAIRS;
 
-  for (const r of rooms.slice(1, -1)) {
-    if (rng() < 0.7) {
-      const t = tiles[r.cy * w + r.cx];
-      if (t === TILE_FLOOR) tiles[r.cy * w + r.cx] = TILE_CHEST;
+  const doors: { x: number; y: number }[] = [];
+
+  // vault door gating the stair room
+  const vaultConn = connections[rooms.length - 2];
+  if (vaultConn) {
+    for (const idx of vaultConn) {
+      const x = idx % w;
+      const y = (idx / w) | 0;
+      if (inAnyRoom(x, y)) continue;
+      tiles[idx] = TILE_DOOR;
+      doors.push({ x, y });
+      break;
     }
+  }
+
+  // prison chambers: a 3x3 pocket walled off with an iron grate + locked door
+  const prisons: { x: number; y: number }[] = [];
+  const prisonRects: { x: number; y: number }[] = [];
+  const nearPrison = (px: number, py: number): boolean =>
+    prisonRects.some((p) => Math.abs(p.x - px) < 3 && Math.abs(p.y - py) < 3);
+  const tryPrison = () => {
+    for (let t = 0; t < 90; t++) {
+      const px = 2 + ri(w - 7);
+      const py = 2 + ri(h - 7);
+      if (nearPrison(px, py)) continue;
+      let pureWall = true;
+      for (let y = py; y < py + 3 && pureWall; y++) {
+        for (let x = px; x < px + 3; x++) {
+          if (tiles[y * w + x] !== TILE_WALL) {
+            pureWall = false;
+            break;
+          }
+        }
+      }
+      if (!pureWall) continue;
+      const sides = [
+        { dx: 0, dy: -1 },
+        { dx: 1, dy: 0 },
+        { dx: 0, dy: 1 },
+        { dx: -1, dy: 0 },
+      ];
+      for (const s of sides) {
+        const mx = s.dx !== 0 ? (s.dx < 0 ? px : px + 2) : px + 1;
+        const my = s.dy !== 0 ? (s.dy < 0 ? py : py + 2) : py + 1;
+        const ox = mx + s.dx;
+        const oy = my + s.dy;
+        if (ox < 0 || oy < 0 || ox >= w || oy >= h) continue;
+        if (tiles[oy * w + ox] !== TILE_FLOOR) continue;
+        for (let y = py; y < py + 3; y++) for (let x = px; x < px + 3; x++) tiles[y * w + x] = TILE_FLOOR;
+        for (let i = 0; i < 3; i++) {
+          const cx = s.dy !== 0 ? px + i : mx;
+          const cy = s.dx !== 0 ? py + i : my;
+          tiles[cy * w + cx] = TILE_BARS;
+        }
+        tiles[my * w + mx] = TILE_DOOR;
+        doors.push({ x: mx, y: my });
+        prisonRects.push({ x: px, y: py });
+        return { x: px + 1, y: py + 1 };
+      }
+    }
+    return null;
+  };
+  for (let i = 0; i < 2; i++) {
+    const p = tryPrison();
+    if (p) prisons.push(p);
+  }
+
+  // reachability from the start (doors are treated as solid)
+  const reach = new Uint8Array(w * h);
+  {
+    const q: number[] = [start.y * w + start.x];
+    reach[start.y * w + start.x] = 1;
+    while (q.length) {
+      const idx = q.pop()!;
+      const x = idx % w;
+      const y = (idx / w) | 0;
+      for (const v of DIR_VEC) {
+        const nx = x + v.x;
+        const ny = y + v.y;
+        if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        const ni = ny * w + nx;
+        if (reach[ni] || isSolid(tiles[ni])) continue;
+        reach[ni] = 1;
+        q.push(ni);
+      }
+    }
+  }
+
+  // one key per locked door, placed reachable from the start
+  let keysPlaced = 0;
+  for (let t = 0; t < 400 && keysPlaced < doors.length; t++) {
+    const x = 1 + ri(w - 2);
+    const y = 1 + ri(h - 2);
+    const i = y * w + x;
+    if (!reach[i] || tiles[i] !== TILE_FLOOR) continue;
+    if (Math.abs(x - start.x) + Math.abs(y - start.y) < 4) continue;
+    tiles[i] = TILE_KEY;
+    keysPlaced++;
+  }
+  for (let i = keysPlaced; i < doors.length; i++) {
+    const d = doors[i];
+    if (tiles[d.y * w + d.x] === TILE_DOOR) tiles[d.y * w + d.x] = TILE_FLOOR;
+  }
+
+  // sparse treasure
+  for (const r of rooms.slice(1, -1)) {
+    if (rng() < 0.28 && tiles[r.cy * w + r.cx] === TILE_FLOOR) tiles[r.cy * w + r.cx] = TILE_CHEST;
   }
 
   const dungeon: Dungeon = { name: "Sunken Vault — B1", w, h, tiles, start };
   addAmbiance(dungeon, seed);
+
+  // decor
+  const decor: Decor[] = [];
+  const mid = rooms.slice(1, -1);
+  for (const r of mid) {
+    const roll = rng();
+    if (roll < 0.14) {
+      if (tiles[r.cy * w + r.cx] === TILE_FLOOR) decor.push({ kind: "fountain", x: r.cx, y: r.cy, dx: 0, dy: 0 });
+    } else if (roll < 0.34) {
+      for (let tries = 0; tries < 6; tries++) {
+        const x = r.x + ri(r.w);
+        const y = r.y + ri(r.h);
+        if (tiles[y * w + x] === TILE_FLOOR) {
+          decor.push({ kind: "table", x, y, dx: 0, dy: 0 });
+          break;
+        }
+      }
+    } else if (roll < 0.52) {
+      for (const [x, y] of [
+        [r.x, r.y],
+        [r.x + r.w - 1, r.y],
+      ] as [number, number][]) {
+        if (tiles[y * w + x] === TILE_FLOOR) decor.push({ kind: "gargoyle", x, y, dx: 0, dy: 0 });
+      }
+    } else if (roll < 0.8) {
+      const n = 1 + ri(2);
+      for (let i = 0; i < n; i++) {
+        const x = r.x + ri(r.w);
+        const y = r.y + ri(r.h);
+        if (tiles[y * w + x] === TILE_FLOOR) decor.push({ kind: "skeleton", x, y, dx: 0, dy: 0 });
+      }
+    }
+  }
+  // rats only in a couple of spots
+  const ratRooms = mid.filter(() => rng() < 0.22).slice(0, 2);
+  for (const r of ratRooms) {
+    const n = 2 + ri(2);
+    for (let i = 0; i < n; i++) {
+      const x = r.x + ri(r.w);
+      const y = r.y + ri(r.h);
+      if (tiles[y * w + x] === TILE_FLOOR) decor.push({ kind: "rat", x, y, dx: 0, dy: 0 });
+    }
+  }
+  // skeletons slumped in some prison cells
+  for (const p of prisons) decor.push({ kind: "skeleton", x: p.x, y: p.y, dx: 0, dy: 0 });
+
+  // old maps hanging on wall faces, avoiding torch spots
+  const lightCell = new Set((dungeon.lights ?? []).map((L) => L.y * w + L.x));
+  let maps = 0;
+  for (let y = 1; y < h - 1 && maps < 6; y++) {
+    for (let x = 1; x < w - 1 && maps < 6; x++) {
+      if (isSolid(tiles[y * w + x])) continue;
+      for (const v of DIR_VEC) {
+        const wx = x + v.x;
+        const wy = y + v.y;
+        if (wx < 1 || wy < 1 || wx >= w - 1 || wy >= h - 1) continue;
+        if (tiles[wy * w + wx] !== TILE_WALL) continue;
+        if (lightCell.has(wy * w + wx)) continue;
+        if (rng() < 0.05) {
+          decor.push({ kind: "map", x: wx, y: wy, dx: -v.x, dy: -v.y });
+          maps++;
+          break;
+        }
+      }
+    }
+  }
+
+  dungeon.decor = decor;
   return dungeon;
 }
 

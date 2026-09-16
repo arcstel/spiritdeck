@@ -6,7 +6,10 @@ import {
   Member,
   MonsterInstance,
   PortraitKind,
+  TILE_BARS,
   TILE_CHEST,
+  TILE_DOOR,
+  TILE_KEY,
   TILE_STAIRS,
   TILE_WALL,
   CardArt,
@@ -669,6 +672,9 @@ export function drawAutomap(
       let col = t === TILE_WALL ? "#2b2b3a" : "#6b6b86";
       if (t === TILE_CHEST) col = C.gold;
       if (t === TILE_STAIRS) col = "#7fd1c0";
+      if (t === TILE_BARS) col = "#3d4152";
+      if (t === TILE_DOOR) col = "#8a6a2e";
+      if (t === TILE_KEY) col = "#ffe08a";
       rect(ctx, ox + x * cell, oy + y * cell, Math.ceil(cell), Math.ceil(cell), col);
     }
   }
