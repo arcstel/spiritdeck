@@ -2,6 +2,8 @@ import { DIR_VEC, SkyLight, TorchLight } from "./data";
 import { H as UI_H, W as UI_W } from "./engine";
 import { Tex, computeNormal, makeCeilingTexture, makeFloorTexture, makeWallTexture } from "./textures";
 
+const BASE = import.meta.env.BASE_URL;
+
 export interface ViewMap {
   w: number;
   h: number;
@@ -382,21 +384,21 @@ export class View3D {
   /** Replace procedural textures with any user-supplied images in /textures/. */
   private loadUserTextures(): void {
     void (async () => {
-      const wall = await loadFirst(["/textures/wall.png", "/textures/wall.jpg"]);
+      const wall = await loadFirst([BASE + "textures/wall.png", BASE + "textures/wall.jpg"]);
       if (!wall || !this.gl) return;
       const [w2, w3, fl, ce, wn, w2n, w3n, fln, cen, a1, a2, a3] = await Promise.all([
-        loadFirst(["/textures/wall2.png", "/textures/wall2.jpg"]),
-        loadFirst(["/textures/wall3.png", "/textures/wall3.jpg"]),
-        loadFirst(["/textures/floor.png", "/textures/floor.jpg"]),
-        loadFirst(["/textures/ceil.png", "/textures/ceil.jpg"]),
-        loadFirst(["/textures/wall_n.png"]),
-        loadFirst(["/textures/wall2_n.png"]),
-        loadFirst(["/textures/wall3_n.png"]),
-        loadFirst(["/textures/floor_n.png"]),
-        loadFirst(["/textures/ceil_n.png"]),
-        loadFirst(["/textures/wall_ao.png"]),
-        loadFirst(["/textures/wall2_ao.png"]),
-        loadFirst(["/textures/wall3_ao.png"]),
+        loadFirst([BASE + "textures/wall2.png", BASE + "textures/wall2.jpg"]),
+        loadFirst([BASE + "textures/wall3.png", BASE + "textures/wall3.jpg"]),
+        loadFirst([BASE + "textures/floor.png", BASE + "textures/floor.jpg"]),
+        loadFirst([BASE + "textures/ceil.png", BASE + "textures/ceil.jpg"]),
+        loadFirst([BASE + "textures/wall_n.png"]),
+        loadFirst([BASE + "textures/wall2_n.png"]),
+        loadFirst([BASE + "textures/wall3_n.png"]),
+        loadFirst([BASE + "textures/floor_n.png"]),
+        loadFirst([BASE + "textures/ceil_n.png"]),
+        loadFirst([BASE + "textures/wall_ao.png"]),
+        loadFirst([BASE + "textures/wall2_ao.png"]),
+        loadFirst([BASE + "textures/wall3_ao.png"]),
       ]);
 
       const wallA = imageToTex(wall, 512);

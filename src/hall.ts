@@ -24,7 +24,7 @@ const BAYS = 7;
 const BAYW = CLEN / BAYS;
 const SKY_Z = -1.3;
 
-const PH = "/textures/ph";
+const PH = `${import.meta.env.BASE_URL}textures/ph`;
 
 /* ------------------------------------------------------------------ */
 /* Small canvas helpers (sky + flame sprite only)                      */
