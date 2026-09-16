@@ -1290,8 +1290,11 @@ export class Hall3D {
       }
 
       if (dc.kind === "inn" || dc.kind === "blacksmith" || dc.kind === "magician" || dc.kind === "prop") {
+        const hd = name.endsWith("_hd");
+        const a = hd ? 5.4 : 5;
+        const b = hd ? 4.8 : 3.3;
         const along = Math.abs(Math.cos(rot)) > 0.5;
-        this.blockRect(dc.x, dc.y, along ? 5 : 3.3, along ? 3.3 : 5);
+        this.blockRect(dc.x, dc.y, along ? a : b, along ? b : a);
       } else if (dc.kind === "stall" || dc.kind === "crate" || dc.kind === "well") {
         this.blockRect(dc.x, dc.y, 0.5, 0.5);
       }

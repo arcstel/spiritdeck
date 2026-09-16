@@ -450,6 +450,7 @@ export function generateDungeon(seed: number): Dungeon {
   tiles[last.cy * w + last.cx] = TILE_STAIRS;
 
   // the way back out to the world map, in the entry room
+  let exitPos: { x: number; y: number } | null = null;
   {
     let bx = -1;
     let by = -1;
@@ -459,14 +460,18 @@ export function generateDungeon(seed: number): Dungeon {
         if (x === start.x && y === start.y) continue;
         if (tiles[y * w + x] !== TILE_FLOOR) continue;
         const dd = Math.abs(x - start.x) + Math.abs(y - start.y);
-        if (dd < best) {
-          best = dd;
+        const score = Math.abs(dd - 3);
+        if (score < best) {
+          best = score;
           bx = x;
           by = y;
         }
       }
     }
-    if (bx >= 0) tiles[by * w + bx] = TILE_EXIT;
+    if (bx >= 0) {
+      tiles[by * w + bx] = TILE_EXIT;
+      exitPos = { x: bx, y: by };
+    }
   }
 
   const doors: { x: number; y: number }[] = [];
@@ -601,6 +606,26 @@ export function generateDungeon(seed: number): Dungeon {
   // decor
   const decor: Decor[] = [];
   const mid = rooms.slice(1, -1);
+
+  // two gargoyles framing the surface exit (so the gate is flanked)
+  if (exitPos) {
+    const horiz = Math.abs(exitPos.x - start.x) >= Math.abs(exitPos.y - start.y);
+    const cands: [number, number][] = horiz
+      ? [
+          [exitPos.x, exitPos.y - 1],
+          [exitPos.x, exitPos.y + 1],
+        ]
+      : [
+          [exitPos.x - 1, exitPos.y],
+          [exitPos.x + 1, exitPos.y],
+        ];
+    for (const [gx, gy] of cands) {
+      if (gx < 0 || gy < 0 || gx >= w || gy >= h) continue;
+      if (tiles[gy * w + gx] !== TILE_FLOOR) continue;
+      if (gx === start.x && gy === start.y) continue;
+      decor.push({ kind: "gargoyle", x: gx, y: gy, dx: 0, dy: 0 });
+    }
+  }
   for (const r of mid) {
     const roll = rng();
     if (roll < 0.14) {
@@ -789,10 +814,10 @@ export function generateTown(seed: number): Dungeon {
   }
 
   // buildings facing the plaza
-  add("inn", cx - 4, 2, "inn", 0);
+  add("inn", cx - 4, 2, "inn_hd", 0);
   add("inn", cx + 4, 2, "tavern", 0);
-  add("blacksmith", 2, cy, "blacksmith_shop", Math.PI / 2);
-  add("magician", w - 3, cy, "magic_shop", -Math.PI / 2);
+  add("blacksmith", 2, cy, "blacksmith_hd", Math.PI / 2);
+  add("magician", w - 3, cy, "magic_shop_hd", -Math.PI / 2);
   add("prop", cx - 4, h - 3, "general_store", 0);
   add("prop", cx + 4, h - 3, "town_house_A", rng() < 0.5 ? 0 : Math.PI);
   add("prop", 2, 3, "town_house_B", Math.PI / 2 + (rng() < 0.5 ? 0 : Math.PI));

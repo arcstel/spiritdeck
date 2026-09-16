@@ -27,9 +27,12 @@ export function loadGargoyleKit(): void {
             const mats = Array.isArray(m.material) ? m.material : [m.material];
             for (const mat of mats) {
               const std = mat as THREE.MeshStandardMaterial;
-              std.color = new THREE.Color(0x5a5e56);
-              std.roughness = 0.92;
+              std.vertexColors = false;
+              std.color = new THREE.Color(0x9a978c);
+              std.roughness = 0.9;
               std.metalness = 0.0;
+              std.map = null;
+              std.needsUpdate = true;
             }
           }
         });
