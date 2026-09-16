@@ -29,6 +29,8 @@ import { VERSION } from "./version";
 import { World, drawWorld, generateWorld } from "./worldmap";
 import { townModel } from "./townkit";
 import { gargoyleModel } from "./gargoylekit";
+import { track } from "./assets";
+import { LoadingScene } from "./loading";
 
 const VIEW = { x: 80, y: 6, w: 224, h: 134 };
 const PANEL_W = 76;
@@ -118,7 +120,8 @@ function canvasTex(canvas: HTMLCanvasElement, srgb: boolean): THREE.CanvasTextur
 }
 
 function phTex(file: string, srgb: boolean, rx: number, ry: number): THREE.Texture {
-  const t = new THREE.TextureLoader().load(`${PH}/${file}`);
+  const done = track();
+  const t = new THREE.TextureLoader().load(`${PH}/${file}`, done, undefined, done);
   t.wrapS = THREE.RepeatWrapping;
   t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(rx, ry);
@@ -407,8 +410,8 @@ function makeGrate(): THREE.Group {
   return g;
 }
 
-/** A heavy iron-banded door that can be locked. */
-function makeDoor(): THREE.Group {
+/** The iron-banded door leaf alone (centred), used for doors and open gateways. */
+function makeDoorLeaf(): THREE.Group {
   const g = new THREE.Group();
   const wood = matWood();
   const panel = new THREE.Mesh(new THREE.BoxGeometry(2.9, 2.6, 0.16), wood);
@@ -428,6 +431,13 @@ function makeDoor(): THREE.Group {
   const handle = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.026, 6, 10), matIron());
   handle.position.set(0.95, 1.25, 0.14);
   g.add(handle);
+  return g;
+}
+
+/** A heavy iron-banded door that can be locked. */
+function makeDoor(): THREE.Group {
+  const g = new THREE.Group();
+  g.add(makeDoorLeaf());
   for (const s of [-1, 1]) {
     const jamb = new THREE.Mesh(new THREE.BoxGeometry(0.22, 2.7, 0.44), matStone());
     jamb.position.set(s * 1.56, 1.35, 0);
@@ -569,34 +579,62 @@ function makeVaultDoor(): THREE.Group {
   return g;
 }
 
-/** An arched gate opening onto daylight, back to the surface. */
-function makeExitGate(): THREE.Group {
+/**
+ * A stone gateway set back into the wall, its iron door swung open. Used for
+ * the vault's way out (the door to the city) and the town's south gate. The
+ * door leaf sits deep in the reveal so the back never looks like the front.
+ */
+interface GatewayOpts {
+  halfW: number;
+  height: number;
+  depth: number;
+}
+
+function makeGateway(opts: GatewayOpts = { halfW: 1.72, height: 4.8, depth: 3.4 }): THREE.Group {
   const g = new THREE.Group();
   const stone = matStone();
+  const { halfW, height: HH, depth } = opts;
+  const openHalf = 1.35;
+  const doorH = Math.min(2.5, HH - 0.55);
+
+  // stone piers left and right of the opening, running the full depth
   for (const s of [-1, 1]) {
-    const pil = new THREE.Mesh(new THREE.BoxGeometry(0.55, 3.3, 0.55), stone);
-    pil.position.set(s * 1.4, 1.65, 0);
-    g.add(pil);
+    const pier = new THREE.Mesh(new THREE.BoxGeometry(halfW - openHalf, HH, depth), stone);
+    pier.position.set(s * (openHalf + (halfW - openHalf) / 2), HH / 2, 0);
+    g.add(pier);
   }
-  const lintel = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.65, 0.65), stone);
-  lintel.position.y = 3.5;
-  g.add(lintel);
-  const cap = new THREE.Mesh(new THREE.BoxGeometry(4.0, 0.3, 0.9), stone);
-  cap.position.y = 3.9;
-  g.add(cap);
-  for (const s of [-1, 1]) {
-    const torch = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.16, 0.3), matIron());
-    torch.position.set(s * 1.4, 2.2, 0.35);
-    g.add(torch);
-  }
+  // header from the door head up to the top
+  const header = new THREE.Mesh(new THREE.BoxGeometry(openHalf * 2 + 0.04, HH - doorH, depth), stone);
+  header.position.set(0, doorH + (HH - doorH) / 2, 0);
+  g.add(header);
+  // threshold slab running out through the reveal
+  const sill = new THREE.Mesh(new THREE.BoxGeometry(openHalf * 2 + 0.3, 0.12, depth), stone);
+  sill.position.set(0, 0.06, 0);
+  g.add(sill);
+  // a carved keystone relief over the front of the opening
+  const key = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 0.3), stone);
+  key.position.set(0, doorH + 0.18, depth / 2 - 0.02);
+  g.add(key);
+
+  // the door leaf, hinged at the back-left jamb and swung open into the reveal
+  const leaf = makeDoorLeaf();
+  leaf.scale.setScalar(0.92);
+  const hinge = new THREE.Group();
+  hinge.position.set(-openHalf + 0.1, 0.12, -depth / 2 + 0.14);
+  hinge.rotation.y = -1.6;
+  leaf.position.set(1.33, 0, 0);
+  hinge.add(leaf);
+  g.add(hinge);
+
+  // dim daylight spilling in from beyond — kept soft to spare the eyes
   const daylight = new THREE.Mesh(
-    new THREE.PlaneGeometry(2.8, 3.3),
-    new THREE.MeshBasicMaterial({ map: canvasTex(makeSkyCanvas(128), true), toneMapped: false })
+    new THREE.PlaneGeometry(2.7, doorH),
+    new THREE.MeshBasicMaterial({ map: canvasTex(makeSkyCanvas(128), true), toneMapped: true, color: 0x8ea6c6 })
   );
-  daylight.position.set(0, 1.75, -0.05);
+  daylight.position.set(0, doorH / 2 + 0.12, -depth / 2 + 0.07);
   g.add(daylight);
-  const sun = new THREE.PointLight(0xffe9c0, 9, 16, 2);
-  sun.position.set(0, 2.5, 1.2);
+  const sun = new THREE.PointLight(0xffe9c0, 2.6, 9, 2);
+  sun.position.set(0, 1.9, -0.7);
   g.add(sun);
   return g;
 }
@@ -1282,7 +1320,9 @@ export class Hall3D {
       const rot = dc.rot ?? 0;
       const name = dc.model ?? "";
       const m = name ? townModel(name) : null;
-      if (m) {
+      if (dc.kind === "gate") {
+        put(makeGateway({ halfW: 4.0, height: 3.3, depth: 2.4 }), dc.x, dc.y, rot);
+      } else if (m) {
         put(m, dc.x, dc.y, rot);
       } else {
         if (dc.kind === "inn") put(makeHouse(7, 6, 4.5, 0xe8dcc0, 0x7a3a2a), dc.x, dc.y, rot);
@@ -1295,8 +1335,7 @@ export class Hall3D {
         else if (dc.kind === "wall") {
           const w = new THREE.Mesh(new THREE.BoxGeometry(CS * 2, 3.0, 0.6), matStone());
           put(w, dc.x, dc.y, rot);
-        } else if (dc.kind === "gate") put(makeExitGate(), dc.x, dc.y, rot);
-        else if (dc.kind === "prop") put(makeCrate(), dc.x, dc.y, rot);
+        } else if (dc.kind === "prop") put(makeCrate(), dc.x, dc.y, rot);
       }
 
       if (
@@ -1785,6 +1824,19 @@ export class Hall3D {
     const glowTex = canvasTex(makeGlowCanvas(128), true);
     let ti = 0;
     for (const L of d.lights ?? []) {
+      // never light a gateway — a nearby brazier would poke through the doorway
+      const fx = L.x + L.dx;
+      const fy = L.y + L.dy;
+      const own = d.tiles[L.y * d.w + L.x];
+      const facing =
+        fx >= 0 && fy >= 0 && fx < d.w && fy < d.h ? d.tiles[fy * d.w + fx] : TILE_WALL;
+      if (
+        own === TILE_EXIT ||
+        own === TILE_EXIT2 ||
+        facing === TILE_EXIT ||
+        facing === TILE_EXIT2
+      )
+        continue;
       const faceX = L.x * CS + L.dx * (CS / 2 - 0.02);
       const faceZ = L.y * CS + L.dy * (CS / 2 - 0.02);
       const b = makeBrazier();
@@ -1867,7 +1919,7 @@ export class Hall3D {
           group.add(g);
           this.doorMeshes.set(cellIdx(gx, gy), g);
         } else if (t === TILE_EXIT || t === TILE_EXIT2) {
-          const g = makeExitGate();
+          const g = makeGateway();
           g.position.set(cx, 0, cz);
           g.rotation.y = Math.atan2(d.start.x - gx, d.start.y - gy);
           group.add(g);
@@ -2258,21 +2310,45 @@ export class HallScene implements Scene {
     }
   }
 
-  glRender(viewEl: HTMLCanvasElement, uiCanvas: HTMLCanvasElement): void {
-    if (this.world === "map") return;
-    if (!this.hall) {
-      try {
-        this.hall = new Hall3D(viewEl, this.dungeon);
-        if (this.world === "town" && this.town) this.hall.loadTown(this.town);
-      } catch (err) {
-        document.title = "HALLERR " + (err as Error).message;
-        this.hall = null;
-        return;
-      }
+  private ensureHall(): void {
+    if (this.hall) return;
+    const viewEl = document.getElementById("view") as HTMLCanvasElement | null;
+    if (!viewEl) return;
+    try {
+      this.hall = new Hall3D(viewEl, this.dungeon);
+      if (this.world === "town" && this.town) this.hall.loadTown(this.town);
+    } catch (err) {
+      document.title = "HALLERR " + (err as Error).message;
+      this.hall = null;
     }
+  }
+
+  /** Build the 3D world and draw a warm-up frame — used behind the loading screen. */
+  preload(): void {
+    if (this.world === "map") return;
+    this.ensureHall();
+    if (!this.hall) return;
+    const uiCanvas = document.getElementById("c") as HTMLCanvasElement | null;
+    if (!uiCanvas) return;
+    this.hall.layout(uiCanvas, VIEW);
+    this.hall.render();
+  }
+
+  glRender(_viewEl: HTMLCanvasElement, uiCanvas: HTMLCanvasElement): void {
+    if (this.world === "map") return;
+    this.ensureHall();
+    if (!this.hall) return;
     if (this.showMap) return;
     this.hall.layout(uiCanvas, VIEW);
     this.hall.render();
+  }
+
+  /** Swap to this scene via a loading screen, after running `apply` to mutate it. */
+  private transition(apply: () => void): void {
+    this.host.setScene(new LoadingScene(this.host, () => {
+      apply();
+      return this;
+    }));
   }
 
   update(dt: number, input: Input): void {
@@ -2383,12 +2459,17 @@ export class HallScene implements Scene {
   }
 
   private descend(): void {
+    this.transition(() => this.descendNow());
+  }
+
+  private descendNow(): void {
     this.floor++;
     const d = generateDungeon((Math.random() * 1e9) | 0);
     this.dungeon = d;
     this.seen = new Uint8Array(d.w * d.h);
     this.lockedMsg = "";
     this.hall?.reset(d);
+    this.lastCell = "";
     this.markSeen();
     this.dist = 0;
     this.msg = [`You descend the stair to B${this.floor}. The dark grows hungrier.`];
@@ -2412,6 +2493,10 @@ export class HallScene implements Scene {
   }
 
   private toDungeon(): void {
+    this.transition(() => this.toDungeonNow());
+  }
+
+  private toDungeonNow(): void {
     const d = this.dungeon ?? generateDungeon((Math.random() * 1e9) | 0);
     this.dungeon = d;
     this.world = "dungeon";
@@ -2430,6 +2515,10 @@ export class HallScene implements Scene {
   }
 
   private enterTown(): void {
+    this.transition(() => this.enterTownNow());
+  }
+
+  private enterTownNow(): void {
     const town = generateTown((Math.random() * 1e9) | 0);
     this.world = "town";
     this.lastCell = "";
@@ -2497,12 +2586,7 @@ export class HallScene implements Scene {
     if (input.justPressed("confirm")) {
       const n = this.map.nodes[this.mapMarker];
       if (n.kind === "dungeon") {
-        const d = this.dungeon ?? generateDungeon((Math.random() * 1e9) | 0);
-        this.dungeon = d;
-        this.world = "dungeon";
-        this.lastCell = "";
-        if (this.hall) this.hall.reset(d);
-        this.msg = ["You descend once more into the vault."];
+        this.toDungeon();
       } else {
         this.enterTown();
       }

@@ -818,7 +818,7 @@ export function generateTown(seed: number): Dungeon {
     add("wall", x, 0, "town_wall_straight", 0);
     if (x !== cx) add("wall", x, h - 1, "town_wall_straight", 0);
   }
-  add("gate", cx, h - 1, "town_wall_gate", 0);
+  add("gate", cx, h - 1, "town_wall_gate", Math.PI);
   for (let y = 1; y < h - 1; y += 2) {
     add("wall", 0, y, "town_wall_straight", Math.PI / 2);
     add("wall", w - 1, y, "town_wall_straight", Math.PI / 2);
@@ -870,7 +870,7 @@ export function generateTown(seed: number): Dungeon {
   // north road (marked) straight back down into the dungeon
   tiles[1 * w + cx] = TILE_EXIT2;
 
-  const start = { x: cx, y: h - 4, dir: 0 };
+  const start = { x: cx, y: h - 3, dir: 0 };
   return { name: "Market Town", w, h, tiles, start, decor, kind: "town" };
 }
 

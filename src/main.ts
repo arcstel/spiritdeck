@@ -2,6 +2,7 @@ import { GameCanvas, Input, Scene, startLoop } from "./engine";
 import { Dungeon, TILE_WALL, addAmbiance, generateDungeon, makeParty } from "./data";
 import { HallScene } from "./hall";
 import { DungeonScene, Host, TitleScene, VIEW } from "./scenes";
+import { LoadingScene } from "./loading";
 import { View3D, ViewState } from "./view3d";
 import { initModelAtlas, renderModelAtlas } from "./models";
 import { loadTownKit } from "./townkit";
@@ -59,6 +60,8 @@ if (mode === "hall") {
   current = new HallScene(host, host.dungeon);
 } else if (mode === "town") {
   current = new HallScene(host);
+} else if (mode === "loading") {
+  current = new LoadingScene(host, () => new HallScene(host, host.dungeon));
 } else if (mode === "dungeon" || mode === "testroom") {
   const ds = new DungeonScene(host);
   const pose = params.get("pose");

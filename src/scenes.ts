@@ -1,5 +1,6 @@
 import { Input, Scene } from "./engine";
 import { HallScene } from "./hall";
+import { LoadingScene } from "./loading";
 import { VERSION } from "./version";
 import {
   DIR_VEC,
@@ -73,7 +74,9 @@ export class TitleScene implements Scene {
   update(dt: number, input: Input): void {
     this.t += dt;
     this.ensureImage();
-    if (input.justPressed("confirm")) this.host.setScene(new HallScene(this.host, this.host.dungeon));
+    if (input.justPressed("confirm")) {
+      this.host.setScene(new LoadingScene(this.host, () => new HallScene(this.host, this.host.dungeon)));
+    }
   }
 
   render(ctx: CanvasRenderingContext2D): void {
