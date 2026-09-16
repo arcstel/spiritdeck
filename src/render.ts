@@ -12,6 +12,7 @@ import {
   CardArt,
 } from "./data";
 import { makeCeilingTexture, makeFloorTexture, makeWallTexture, Tex } from "./textures";
+import { mulberry32 } from "./engine";
 
 export const C = {
   bg: "#08080e",
@@ -314,6 +315,149 @@ export function renderView(
 }
 
 /* ------------------------------------------------------------------ */
+/* Holographic portrait box                                            */
+/* ------------------------------------------------------------------ */
+
+let frameImg: HTMLImageElement | null = null;
+let frameTried = false;
+
+/** Ornate frame supplied by the user at /textures/portrait_frame.png (optional). */
+function frameImage(): HTMLImageElement | null {
+  if (!frameTried) {
+    frameTried = true;
+    const im = new Image();
+    im.onload = () => {
+      frameImg = im;
+    };
+    im.onerror = () => {
+      frameImg = null;
+    };
+    im.src = `${import.meta.env.BASE_URL}textures/portrait_frame.png`;
+  }
+  return frameImg;
+}
+
+let scratchCv: HTMLCanvasElement | null = null;
+let scratchCtx: CanvasRenderingContext2D | null = null;
+function scratch(w: number, h: number): { c: HTMLCanvasElement; g: CanvasRenderingContext2D } {
+  if (!scratchCv) {
+    scratchCv = document.createElement("canvas");
+    scratchCtx = scratchCv.getContext("2d");
+  }
+  if (scratchCv.width < w) scratchCv.width = w;
+  if (scratchCv.height < h) scratchCv.height = h;
+  if (!scratchCtx) throw new Error("no scratch ctx");
+  return { c: scratchCv, g: scratchCtx };
+}
+
+const KIND_SEED: Record<PortraitKind, number> = { warrior: 11, mage: 47, cleric: 83, spirit: 129 };
+
+function drawStars(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, seed: number): void {
+  const grd = ctx.createLinearGradient(x, y, x, y + h);
+  grd.addColorStop(0, "#0a1020");
+  grd.addColorStop(1, "#0a0e1a");
+  ctx.fillStyle = grd;
+  ctx.fillRect(x, y, w, h);
+  const rng = mulberry32(seed);
+  const t = performance.now() / 1000;
+  const n = Math.max(40, Math.floor((w * h) / 40));
+  for (let i = 0; i < n; i++) {
+    const sx = x + rng() * w;
+    const sy = y + rng() * h;
+    const r = rng();
+    const tw = 0.5 + 0.5 * Math.sin(t * 2 + i * 1.7);
+    ctx.fillStyle = `rgba(${(170 + rng() * 85) | 0},${(200 + rng() * 55) | 0},255,${(0.25 + 0.75 * tw).toFixed(2)})`;
+    const s = r < 0.85 ? 1 : 2;
+    ctx.fillRect(sx, sy, s, s);
+  }
+}
+
+/** Fallback ornate gold frame if the user hasn't supplied portrait_frame.png yet. */
+function drawOrnateFrame(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): void {
+  ctx.fillStyle = "#241b0e";
+  ctx.fillRect(x, y, w, h);
+  const golds = ["#6b5528", "#a8894a", "#dcc17e", "#f2e6b8"];
+  for (let i = 0; i < golds.length; i++) {
+    ctx.strokeStyle = golds[i];
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + i + 0.5, y + i + 0.5, w - i * 2 - 1, h - i * 2 - 1);
+  }
+  ctx.fillStyle = "#f2e6b8";
+  const d = 2.5;
+  for (const [px, py] of [
+    [x + 2, y + 2],
+    [x + w - 2, y + 2],
+    [x + 2, y + h - 2],
+    [x + w - 2, y + h - 2],
+  ]) {
+    ctx.beginPath();
+    ctx.moveTo(px, py - d);
+    ctx.lineTo(px + d, py);
+    ctx.lineTo(px, py + d);
+    ctx.lineTo(px - d, py);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+export function drawHoloBox(
+  ctx: CanvasRenderingContext2D,
+  kind: PortraitKind,
+  el: Element,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+): void {
+  const t = performance.now() / 1000;
+  const im = frameImage();
+  if (im && im.complete && im.naturalWidth > 0) {
+    ctx.drawImage(im, x, y, w, h);
+  } else {
+    drawStars(ctx, x, y, w, h, KIND_SEED[kind]);
+    drawOrnateFrame(ctx, x, y, w, h);
+  }
+
+  const insetX = Math.round(w * 0.13);
+  const insetY = Math.round(h * 0.13);
+  const ix = x + insetX;
+  const iy = y + insetY;
+  const iw = w - insetX * 2;
+  const ih = h - insetY * 2;
+
+  const sc = scratch(w, h);
+  sc.g.clearRect(0, 0, w, h);
+  drawPortrait(sc.g, kind, 0, 0, w, h, el);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(ix, iy, iw, ih);
+  ctx.clip();
+
+  ctx.globalAlpha = 0.9;
+  ctx.globalCompositeOperation = "lighter";
+  ctx.drawImage(sc.c, 0, 0, w, h, ix, iy, iw, ih);
+
+  ctx.globalCompositeOperation = "screen";
+  ctx.globalAlpha = 0.28;
+  ctx.fillStyle = "#5fc8ff";
+  ctx.fillRect(ix, iy, iw, ih);
+
+  ctx.globalCompositeOperation = "source-over";
+  ctx.globalAlpha = 0.16;
+  ctx.fillStyle = "#000814";
+  for (let ly = iy; ly < iy + ih; ly += 3) ctx.fillRect(ix, ly, iw, 1);
+
+  const barY = iy + (((t * 20) % (ih + 8)) | 0) - 4;
+  ctx.globalAlpha = 0.22;
+  ctx.fillStyle = "#cdf1ff";
+  ctx.fillRect(ix, barY, iw, 2);
+
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+/* ------------------------------------------------------------------ */
 /* Party panel                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -329,8 +473,7 @@ export function drawMemberCard(
   frame(ctx, x, y, w, h, active ? C.panelHi : C.panel, active ? C.gold : C.bevelHi, C.bevelLo);
   const portW = w - 8;
   const portH = Math.floor(h * 0.46);
-  rect(ctx, x + 4, y + 4, portW, portH, "#0d0d16");
-  drawPortrait(ctx, m.art, x + 4, y + 4, portW, portH, m.element);
+  drawHoloBox(ctx, m.art, m.element, x + 4, y + 4, portW, portH);
 
   text(ctx, m.name, x + 4, y + portH + 6, active ? C.gold : C.text, 8);
   text(ctx, `L${m.lv}`, x + w - 4 - textWidth(ctx, `L${m.lv}`), y + portH + 6, C.dim, 8);
