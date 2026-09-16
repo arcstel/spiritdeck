@@ -4,7 +4,7 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { DIR_VEC, Dungeon, TILE_WALL } from "./data";
+import { DIR_VEC, Dungeon, TILE_WALL, rollEncounter } from "./data";
 import { Input, Scene, mulberry32 } from "./engine";
 import { C, drawCompass, drawMemberCard, drawMessage, rect, text } from "./render";
 import type { Host } from "./scenes";
@@ -178,30 +178,37 @@ export class Hall3D {
   private lastH = -1;
   private gcs = 3.4;
   private lightPool: THREE.PointLight[] = [];
+  private playerLight: THREE.PointLight | null = null;
 
   constructor(private canvas: HTMLCanvasElement, private grid?: Dungeon) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.0;
+    this.renderer.toneMappingExposure = 1.06;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
     this.camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.05, 200);
     if (this.grid) {
-      const s = this.grid.start;
+      const g = this.grid;
+      const s = g.start;
       this.pos.set(s.x * this.gcs, 1.62, s.y * this.gcs);
-      const open = (dx: number, dy: number): boolean => {
-        const nx = s.x + dx;
-        const ny = s.y + dy;
-        if (nx < 0 || ny < 0 || nx >= this.grid!.w || ny >= this.grid!.h) return false;
-        return this.grid!.tiles[ny * this.grid!.w + nx] !== TILE_WALL;
+      const openAt = (x: number, y: number): boolean =>
+        x >= 0 && y >= 0 && x < g.w && y < g.h && g.tiles[y * g.w + x] !== TILE_WALL;
+      const run = (dx: number, dy: number): number => {
+        let n = 0;
+        for (let k = 1; k < 16; k++) {
+          if (!openAt(s.x + dx * k, s.y + dy * k)) break;
+          n++;
+        }
+        return n;
       };
       let dir = s.dir;
-      for (let i = 0; i < 4; i++) {
-        const d = (s.dir + i) % 4;
-        const v = DIR_VEC[d];
-        if (open(v.x, v.y)) {
-          dir = d;
-          break;
+      let best = -1;
+      for (let dd = 0; dd < 4; dd++) {
+        const v = DIR_VEC[dd];
+        const r = run(v.x, v.y);
+        if (r > best) {
+          best = r;
+          dir = dd;
         }
       }
       this.yaw = DIR_YAW[dir];
@@ -221,6 +228,10 @@ export class Hall3D {
       const l = new THREE.PointLight(0xffa860, 0, 6.5, 2);
       this.scene.add(l);
       this.lightPool.push(l);
+    }
+    if (this.grid) {
+      this.playerLight = new THREE.PointLight(0xffe0b0, 2.8, 9.0, 2);
+      this.scene.add(this.playerLight);
     }
     this.ready = true;
   }
@@ -427,7 +438,7 @@ export class Hall3D {
     group.add(skyDir);
     group.add(skyDir.target);
 
-    this.scene.add(new THREE.AmbientLight(0x1b2433, 0.45));
+    this.scene.add(new THREE.AmbientLight(0x243040, 0.6));
     this.scene.add(new THREE.HemisphereLight(0x2b3a52, 0x07060a, 0.3));
 
     // drifting dust motes
@@ -539,6 +550,45 @@ export class Hall3D {
     addMerged(wallGeos, wallMat);
     this.scene.add(group);
 
+    // transverse stone arches over straight corridor cells
+    const ribGeo = new THREE.TorusGeometry(CS / 2, 0.14, 8, 20, Math.PI);
+    const ribMat = new THREE.MeshStandardMaterial({
+      map: phTex("rustic_stone_wall_Diffuse.jpg", true, 0.8, 0.8),
+      normalMap: phTex("rustic_stone_wall_nor_gl.jpg", false, 0.8, 0.8),
+      roughness: 1.0,
+      metalness: 0.0,
+      color: 0xbdb6a8,
+    });
+    const ribCells: { x: number; z: number; rot: number }[] = [];
+    for (let gy = 0; gy < d.h; gy++) {
+      for (let gx = 0; gx < d.w; gx++) {
+        if (isWall(gx, gy)) continue;
+        const n = !isWall(gx, gy - 1);
+        const s2 = !isWall(gx, gy + 1);
+        const e = !isWall(gx + 1, gy);
+        const w = !isWall(gx - 1, gy);
+        if (n && s2 && !(e && w)) ribCells.push({ x: gx * CS, z: gy * CS, rot: 0 });
+        else if (e && w && !(n && s2)) ribCells.push({ x: gx * CS, z: gy * CS, rot: Math.PI / 2 });
+      }
+    }
+    if (ribCells.length) {
+      const inst = new THREE.InstancedMesh(ribGeo, ribMat, ribCells.length);
+      const mat = new THREE.Matrix4();
+      const q = new THREE.Quaternion();
+      const eu = new THREE.Euler();
+      const p = new THREE.Vector3();
+      const sc = new THREE.Vector3(1, 1, 1.8);
+      ribCells.forEach((c, i) => {
+        eu.set(0, c.rot, 0);
+        q.setFromEuler(eu);
+        p.set(c.x, HH - CS / 2, c.z);
+        mat.compose(p, q, sc);
+        inst.setMatrixAt(i, mat);
+      });
+      inst.instanceMatrix.needsUpdate = true;
+      group.add(inst);
+    }
+
     // skylights cut into the ceiling
     for (const s of d.sky ?? []) {
       const cx = s.x * CS;
@@ -578,7 +628,7 @@ export class Hall3D {
       ti++;
     }
 
-    this.scene.add(new THREE.AmbientLight(0x1b2433, 0.45));
+    this.scene.add(new THREE.AmbientLight(0x243040, 0.6));
     this.scene.add(new THREE.HemisphereLight(0x2b3a52, 0x07060a, 0.3));
 
     const N = 600;
@@ -643,7 +693,7 @@ export class Hall3D {
     }
   }
 
-  update(dt: number, input: Input): void {
+  update(dt: number, input: Input): number {
     this.t += dt;
     const turn = 2.3;
     const speed = 2.7;
@@ -686,7 +736,7 @@ export class Hall3D {
         const f = nearest[i].f;
         const fl = 0.78 + 0.22 * Math.sin(this.t * 15 + f.phase) + 0.1 * Math.sin(this.t * 37 + f.phase * 2.1);
         l.position.set(f.x, f.y, f.z);
-        l.intensity = 9 * fl;
+        l.intensity = 12 * fl;
       } else {
         l.intensity = 0;
       }
@@ -713,6 +763,9 @@ export class Hall3D {
       const m = this.shaft.material as THREE.MeshBasicMaterial;
       m.opacity = 0.022 + 0.012 * (0.5 + 0.5 * Math.sin(this.t * 0.7));
     }
+
+    if (this.playerLight) this.playerLight.position.set(camx, 1.95, camz);
+    return mz !== 0 ? speed * dt : 0;
   }
 
   heading(): number {
@@ -732,6 +785,9 @@ export class Hall3D {
 
 export class HallScene implements Scene {
   private hall: Hall3D | null = null;
+  private dist = 0;
+  private nextDist = 12 + Math.random() * 16;
+  private msg: string[] = ["The Sunken Vault — B1. The air is cold and still."];
 
   constructor(private host: Host, private dungeon?: Dungeon) {}
 
@@ -750,7 +806,32 @@ export class HallScene implements Scene {
   }
 
   update(dt: number, input: Input): void {
-    this.hall?.update(dt, input);
+    const moved = this.hall?.update(dt, input) ?? 0;
+    if (moved > 0) {
+      this.dist += moved;
+      if (this.dist >= this.nextDist) {
+        this.dist = 0;
+        this.nextDist = 12 + Math.random() * 16;
+        void this.startEncounter();
+      }
+    }
+  }
+
+  private async startEncounter(): Promise<void> {
+    const size = Math.random() < 0.3 ? 3 : 2;
+    const monsters = rollEncounter((Math.random() * 1e9) | 0, size);
+    const { BattleScene } = await import("./scenes");
+    const scene = new BattleScene(this.host, monsters, (result) => {
+      if (result === "win") {
+        this.msg = ["The corridor falls silent again."];
+      } else {
+        this.msg = ["You wake at the vault mouth, bruised."];
+        for (const m of this.host.party) m.hp = Math.max(1, Math.floor(m.maxHp / 2));
+      }
+      this.host.setScene(this);
+    });
+    this.msg = [`${monsters.length} cards are dealt!`];
+    this.host.setScene(scene);
   }
 
   render(ctx: CanvasRenderingContext2D): void {
@@ -768,11 +849,7 @@ export class HallScene implements Scene {
     drawMemberCard(ctx, this.host.party[3], 308, 108, PANEL_W, 100, false);
 
     drawCompass(ctx, this.hall ? this.hall.heading() : 0, 192, 124);
-    drawMessage(ctx, VIEW.x, 150, VIEW.w, 62, [
-      "The Sunken Vault — B1.",
-      "",
-      `Gold ${this.host.gold}`,
-    ]);
+    drawMessage(ctx, VIEW.x, 150, VIEW.w, 62, [...this.msg, "", `Gold ${this.host.gold}`]);
     text(ctx, "[M] map", VIEW.x + 4, 141, C.dim, 8);
   }
 }

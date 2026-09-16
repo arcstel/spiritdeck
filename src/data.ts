@@ -277,12 +277,12 @@ export function addAmbiance(d: Dungeon, seed = 1): void {
         if (d.tiles[wy * d.w + wx] !== TILE_WALL) continue;
         let tooClose = false;
         for (const L of lights) {
-          if (Math.abs(L.x - wx) + Math.abs(L.y - wy) < 3) {
+          if (Math.abs(L.x - wx) + Math.abs(L.y - wy) < 2) {
             tooClose = true;
             break;
           }
         }
-        if (tooClose || rng() < 0.42) continue;
+        if (tooClose || rng() < 0.2) continue;
         lights.push({ x: wx, y: wy, dx: -v.x, dy: -v.y });
       }
     }
@@ -312,8 +312,8 @@ export function addAmbiance(d: Dungeon, seed = 1): void {
 }
 
 export function generateDungeon(seed: number): Dungeon {
-  const w = 21;
-  const h = 21;
+  const w = 29;
+  const h = 29;
   const tiles = new Uint8Array(w * h).fill(TILE_WALL);
   const rng = mulberry32(seed);
   const ri = (n: number) => Math.floor(rng() * n);
@@ -324,7 +324,7 @@ export function generateDungeon(seed: number): Dungeon {
   const rooms: { cx: number; cy: number }[] = [];
   let prev: { cx: number; cy: number } | null = null;
 
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 11; i++) {
     const rw = 3 + ri(4);
     const rh = 3 + ri(4);
     const rx = 1 + ri(w - rw - 2);

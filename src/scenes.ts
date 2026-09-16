@@ -43,7 +43,7 @@ const PANEL_W = 76;
 export const VIEW = { x: 80, y: 6, w: 224, h: 134 };
 const MSG = { x: 80, y: 150, w: 224, h: 62 };
 const FACING = ["N", "E", "S", "W"];
-const ENCOUNTERS = false;
+const ENCOUNTERS = true;
 
 /* ================================================================== */
 /* Title                                                              */
@@ -55,7 +55,7 @@ export class TitleScene implements Scene {
 
   update(dt: number, input: Input): void {
     this.t += dt;
-    if (input.justPressed("confirm")) this.host.setScene(new HallScene(this.host));
+    if (input.justPressed("confirm")) this.host.setScene(new HallScene(this.host, this.host.dungeon));
   }
 
   render(ctx: CanvasRenderingContext2D): void {
