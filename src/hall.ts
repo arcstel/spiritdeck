@@ -821,6 +821,8 @@ export class Hall3D {
   private blocks = new Set<number>();
   private doorMeshes = new Map<number, THREE.Object3D>();
   private radius = 0.42;
+  private stepTween: { fx: number; fz: number; tx: number; tz: number; t: number; dur: number } | null = null;
+  private turnTween: { from: number; to: number; t: number; dur: number } | null = null;
   private dust: THREE.Points | null = null;
   private dustPos: Float32Array | null = null;
   private shaft: THREE.Mesh | null = null;
@@ -906,6 +908,8 @@ export class Hall3D {
     this.blocks = new Set();
     this.doorMeshes = new Map();
     this.props = [];
+    this.stepTween = null;
+    this.turnTween = null;
     this.dust = null;
     this.dustPos = null;
     this.shaft = null;
@@ -931,7 +935,7 @@ export class Hall3D {
     const idx = this.props.findIndex((p) => p.gx === gx && p.gy === gy);
     if (idx < 0) return null;
     const p = this.props[idx];
-    this.scene.remove(p.obj);
+    p.obj.removeFromParent();
     this.props.splice(idx, 1);
     return p.type;
   }
@@ -1563,28 +1567,49 @@ export class Hall3D {
 
   update(dt: number, input: Input): number {
     this.t += dt;
-    const turn = 2.3;
-    const speed = 2.7;
-    if (input.held("left")) this.yaw += turn * dt;
-    if (input.held("right")) this.yaw -= turn * dt;
+    const STEP_DUR = 0.24;
+    const TURN_DUR = 0.16;
+    let moved = 0;
 
-    const fx = -Math.sin(this.yaw);
-    const fz = -Math.cos(this.yaw);
-    let mz = 0;
-    if (input.held("up")) mz += 1;
-    if (input.held("down")) mz -= 1;
-    if (mz !== 0) {
-      const nx = this.pos.x + fx * speed * dt * mz;
-      const nz = this.pos.z + fz * speed * dt * mz;
-      if (this.grid) {
-        if (this.canStand(nx, this.pos.z)) this.pos.x = nx;
-        if (this.canStand(this.pos.x, nz)) this.pos.z = nz;
-      } else {
-        this.pos.x = nx;
-        this.pos.z = nz;
+    if (this.turnTween) {
+      this.turnTween.t += dt;
+      const k = Math.min(1, this.turnTween.t / this.turnTween.dur);
+      const e = k * k * (3 - 2 * k);
+      this.yaw = this.turnTween.from + (this.turnTween.to - this.turnTween.from) * e;
+      if (k >= 1) {
+        this.yaw = this.turnTween.to;
+        this.turnTween = null;
+      }
+    } else if (this.stepTween) {
+      this.stepTween.t += dt;
+      const k = Math.min(1, this.stepTween.t / this.stepTween.dur);
+      const e = k * k * (3 - 2 * k);
+      this.pos.x = this.stepTween.fx + (this.stepTween.tx - this.stepTween.fx) * e;
+      this.pos.z = this.stepTween.fz + (this.stepTween.tz - this.stepTween.fz) * e;
+      if (k >= 1) {
+        this.pos.x = this.stepTween.tx;
+        this.pos.z = this.stepTween.tz;
+        this.stepTween = null;
+        moved = this.gcs;
+      }
+    } else if (input.held("left")) {
+      this.turnTween = { from: this.yaw, to: this.yaw + Math.PI / 2, t: 0, dur: TURN_DUR };
+    } else if (input.held("right")) {
+      this.turnTween = { from: this.yaw, to: this.yaw - Math.PI / 2, t: 0, dur: TURN_DUR };
+    } else {
+      const dir = input.held("up") ? 1 : input.held("down") ? -1 : 0;
+      if (dir !== 0) {
+        const fx = -Math.sin(this.yaw);
+        const fz = -Math.cos(this.yaw);
+        const tx = this.pos.x + fx * this.gcs * dir;
+        const tz = this.pos.z + fz * this.gcs * dir;
+        if (!this.grid || this.canStand(tx, tz)) {
+          this.stepTween = { fx: this.pos.x, fz: this.pos.z, tx, tz, t: 0, dur: STEP_DUR };
+        }
       }
     }
-    const bob = 0.02 * Math.sin(this.t * 9) * (mz !== 0 ? 1 : 0);
+
+    const bob = this.stepTween ? 0.03 * Math.sin(Math.min(1, this.stepTween.t / this.stepTween.dur) * Math.PI) : 0;
     if (!this.grid) {
       const lx = HALF - 0.55;
       this.pos.x = Math.max(-lx, Math.min(lx, this.pos.x));
@@ -1634,7 +1659,7 @@ export class Hall3D {
 
     if (this.playerLight) this.playerLight.position.set(camx, 1.95, camz);
     this.updateRats(dt);
-    return mz !== 0 ? speed * dt : 0;
+    return moved;
   }
 
   private walkableCell(gx: number, gy: number): boolean {
