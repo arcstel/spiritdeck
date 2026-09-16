@@ -411,6 +411,32 @@ function drawOrnateFrame(ctx: CanvasRenderingContext2D, x: number, y: number, w:
   }
 }
 
+/** Draw an image as a nine-slice so ornate corners keep their shape at any aspect. */
+function drawNineSlice(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  border: number,
+  srcInset: number
+): void {
+  const sw = img.naturalWidth;
+  const sh = img.naturalHeight;
+  const s = Math.min(srcInset, Math.floor(Math.min(sw, sh) / 3));
+  const b = Math.min(border, Math.floor(Math.min(w, h) / 3));
+  ctx.drawImage(img, 0, 0, s, s, x, y, b, b);
+  ctx.drawImage(img, sw - s, 0, s, s, x + w - b, y, b, b);
+  ctx.drawImage(img, 0, sh - s, s, s, x, y + h - b, b, b);
+  ctx.drawImage(img, sw - s, sh - s, s, s, x + w - b, y + h - b, b, b);
+  ctx.drawImage(img, s, 0, sw - 2 * s, s, x + b, y, w - 2 * b, b);
+  ctx.drawImage(img, s, sh - s, sw - 2 * s, s, x + b, y + h - b, w - 2 * b, b);
+  ctx.drawImage(img, 0, s, s, sh - 2 * s, x, y + b, b, h - 2 * b);
+  ctx.drawImage(img, sw - s, s, s, sh - 2 * s, x + w - b, y + b, b, h - 2 * b);
+  ctx.drawImage(img, s, s, sw - 2 * s, sh - 2 * s, x + b, y + b, w - 2 * b, h - 2 * b);
+}
+
 export function drawHoloBox(
   ctx: CanvasRenderingContext2D,
   kind: PortraitKind,
@@ -422,19 +448,27 @@ export function drawHoloBox(
 ): void {
   const t = performance.now() / 1000;
   const im = frameImage();
+  let ix: number;
+  let iy: number;
+  let iw: number;
+  let ih: number;
   if (im && im.complete && im.naturalWidth > 0) {
-    ctx.drawImage(im, x, y, w, h);
+    const b = Math.max(6, Math.round(Math.min(w, h) * 0.15));
+    drawNineSlice(ctx, im, x, y, w, h, b, 150);
+    ix = x + b;
+    iy = y + b;
+    iw = w - b * 2;
+    ih = h - b * 2;
   } else {
     drawStars(ctx, x, y, w, h, KIND_SEED[kind]);
     drawOrnateFrame(ctx, x, y, w, h);
+    const insetX = Math.round(w * 0.13);
+    const insetY = Math.round(h * 0.13);
+    ix = x + insetX;
+    iy = y + insetY;
+    iw = w - insetX * 2;
+    ih = h - insetY * 2;
   }
-
-  const insetX = Math.round(w * 0.13);
-  const insetY = Math.round(h * 0.13);
-  const ix = x + insetX;
-  const iy = y + insetY;
-  const iw = w - insetX * 2;
-  const ih = h - insetY * 2;
 
   const sc = scratch(w, h);
   sc.g.clearRect(0, 0, w, h);
@@ -445,12 +479,16 @@ export function drawHoloBox(
   ctx.rect(ix, iy, iw, ih);
   ctx.clip();
 
-  ctx.globalAlpha = 0.9;
+  ctx.globalAlpha = 0.95;
+  ctx.globalCompositeOperation = "source-over";
+  ctx.drawImage(sc.c, 0, 0, w, h, ix, iy, iw, ih);
+
   ctx.globalCompositeOperation = "lighter";
+  ctx.globalAlpha = 0.45;
   ctx.drawImage(sc.c, 0, 0, w, h, ix, iy, iw, ih);
 
   ctx.globalCompositeOperation = "screen";
-  ctx.globalAlpha = 0.28;
+  ctx.globalAlpha = 0.25;
   ctx.fillStyle = "#5fc8ff";
   ctx.fillRect(ix, iy, iw, ih);
 
