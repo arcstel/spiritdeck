@@ -114,8 +114,8 @@ export type PortraitKind = "warrior" | "mage" | "cleric" | "spirit";
 export function makeParty(): Member[] {
   return [
     {
-      id: "kael",
-      name: "Kael",
+      id: "arcstel",
+      name: "Arcstel",
       role: "Swordhand",
       element: "ember",
       lv: 1,
@@ -148,8 +148,8 @@ export function makeParty(): Member[] {
       art: "cleric",
     },
     {
-      id: "lyra",
-      name: "Lyra",
+      id: "nemne",
+      name: "Nemne",
       role: "Emberwright",
       element: "ember",
       lv: 1,

@@ -3,6 +3,8 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { DIR_VEC, Dungeon, TILE_WALL } from "./data";
 import { Input, Scene, mulberry32 } from "./engine";
 import { C, drawCompass, drawMemberCard, drawMessage, rect, text } from "./render";
 import type { Host } from "./scenes";
@@ -23,6 +25,9 @@ const CLEN = Z0 - Z1;
 const BAYS = 7;
 const BAYW = CLEN / BAYS;
 const SKY_Z = -1.3;
+
+/** Yaw (radians) for each facing index 0=N,1=E,2=S,3=W. */
+const DIR_YAW = [0, -Math.PI / 2, Math.PI, Math.PI / 2];
 
 const PH = `${import.meta.env.BASE_URL}textures/ph`;
 
@@ -150,8 +155,10 @@ function arcadeGeometry(len: number, h: number, bays: number, thickness: number)
 
 interface Flame {
   sprite: THREE.Sprite;
-  light: THREE.PointLight;
   phase: number;
+  x: number;
+  y: number;
+  z: number;
 }
 
 export class Hall3D {
@@ -169,14 +176,36 @@ export class Hall3D {
   private ready = false;
   private lastW = -1;
   private lastH = -1;
+  private gcs = 3.4;
+  private lightPool: THREE.PointLight[] = [];
 
-  constructor(private canvas: HTMLCanvasElement) {
+  constructor(private canvas: HTMLCanvasElement, private grid?: Dungeon) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.0;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
     this.camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.05, 200);
+    if (this.grid) {
+      const s = this.grid.start;
+      this.pos.set(s.x * this.gcs, 1.62, s.y * this.gcs);
+      const open = (dx: number, dy: number): boolean => {
+        const nx = s.x + dx;
+        const ny = s.y + dy;
+        if (nx < 0 || ny < 0 || nx >= this.grid!.w || ny >= this.grid!.h) return false;
+        return this.grid!.tiles[ny * this.grid!.w + nx] !== TILE_WALL;
+      };
+      let dir = s.dir;
+      for (let i = 0; i < 4; i++) {
+        const d = (s.dir + i) % 4;
+        const v = DIR_VEC[d];
+        if (open(v.x, v.y)) {
+          dir = d;
+          break;
+        }
+      }
+      this.yaw = DIR_YAW[dir];
+    }
     this.camera.position.copy(this.pos);
     this.scene.fog = new THREE.FogExp2(0x05070c, 0.032);
     this.scene.background = new THREE.Color(0x04050a);
@@ -188,10 +217,19 @@ export class Hall3D {
     this.composer.addPass(new OutputPass());
 
     this.build();
+    for (let i = 0; i < 14; i++) {
+      const l = new THREE.PointLight(0xffa860, 0, 6.5, 2);
+      this.scene.add(l);
+      this.lightPool.push(l);
+    }
     this.ready = true;
   }
 
   private build(): void {
+    if (this.grid) {
+      this.buildGrid(this.grid);
+      return;
+    }
     // ----- materials (photoscanned CC0 PBR) -----
     const wallMat = new THREE.MeshStandardMaterial({
       map: phTex("rustic_stone_wall_Diffuse.jpg", true, 0.5, 0.5),
@@ -371,10 +409,7 @@ export class Hall3D {
       flame.position.set(side * (HALF - 0.28), 2.86, z);
       group.add(flame);
 
-      const light = new THREE.PointLight(0xffa860, 9, 6.0, 2);
-      light.position.set(side * (HALF - 0.4), 2.86, z);
-      group.add(light);
-      this.flames.push({ sprite: flame, light, phase: i * 1.7 });
+      this.flames.push({ sprite: flame, phase: i * 1.7, x: side * (HALF - 0.4), y: 2.86, z });
     }
 
     // distant torch inside the doorway
@@ -424,6 +459,164 @@ export class Hall3D {
     this.scene.add(dustMesh);
   }
 
+  /** Build an entire floor from a tile grid: floor, ceiling, walls, lights, dust. */
+  private buildGrid(d: Dungeon): void {
+    const CS = this.gcs;
+    const HH = 4.8;
+    const isWall = (x: number, y: number): boolean =>
+      x < 0 || y < 0 || x >= d.w || y >= d.h || d.tiles[y * d.w + x] === TILE_WALL;
+
+    const wallMat = new THREE.MeshStandardMaterial({
+      map: phTex("rustic_stone_wall_Diffuse.jpg", true, CS / 2.4, HH / 2.4),
+      normalMap: phTex("rustic_stone_wall_nor_gl.jpg", false, CS / 2.4, HH / 2.4),
+      roughnessMap: phTex("rustic_stone_wall_Rough.jpg", false, CS / 2.4, HH / 2.4),
+      aoMap: phTex("rustic_stone_wall_AO.jpg", false, CS / 2.4, HH / 2.4),
+      aoMapIntensity: 1.1,
+      roughness: 1.0,
+      metalness: 0.0,
+      color: 0xc6cdd6,
+    });
+    const floorMat = new THREE.MeshStandardMaterial({
+      map: phTex("cobblestone_floor_08_Diffuse.jpg", true, CS / 2.4, CS / 2.4),
+      normalMap: phTex("cobblestone_floor_08_nor_gl.jpg", false, CS / 2.4, CS / 2.4),
+      roughnessMap: phTex("cobblestone_floor_08_Rough.jpg", false, CS / 2.4, CS / 2.4),
+      aoMap: phTex("cobblestone_floor_08_AO.jpg", false, CS / 2.4, CS / 2.4),
+      aoMapIntensity: 1.0,
+      roughness: 1.0,
+      metalness: 0.0,
+    });
+    const ceilMat = new THREE.MeshStandardMaterial({
+      map: phTex("rustic_stone_wall_Diffuse.jpg", true, CS / 2.4, CS / 2.4),
+      normalMap: phTex("rustic_stone_wall_nor_gl.jpg", false, CS / 2.4, CS / 2.4),
+      roughness: 1.0,
+      metalness: 0.0,
+      color: 0x6e6a60,
+    });
+
+    const wallGeos: THREE.BufferGeometry[] = [];
+    const floorGeos: THREE.BufferGeometry[] = [];
+    const ceilGeos: THREE.BufferGeometry[] = [];
+    const skySet = new Set((d.sky ?? []).map((s) => s.y * d.w + s.x));
+
+    for (let gy = 0; gy < d.h; gy++) {
+      for (let gx = 0; gx < d.w; gx++) {
+        if (isWall(gx, gy)) continue;
+        const cx = gx * CS;
+        const cz = gy * CS;
+        floorGeos.push(new THREE.PlaneGeometry(CS, CS).rotateX(-Math.PI / 2).translate(cx, 0, cz));
+        if (!skySet.has(gy * d.w + gx)) {
+          ceilGeos.push(new THREE.PlaneGeometry(CS, CS).rotateX(Math.PI / 2).translate(cx, HH, cz));
+        }
+        const dirs: [number, number][] = [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ];
+        for (const [dx, dy] of dirs) {
+          if (!isWall(gx + dx, gy + dy)) continue;
+          const w = new THREE.PlaneGeometry(CS, HH);
+          if (dx === 1) w.rotateY(-Math.PI / 2);
+          else if (dx === -1) w.rotateY(Math.PI / 2);
+          else if (dy === 1) w.rotateY(Math.PI);
+          w.translate(cx + (dx * CS) / 2, HH / 2, cz + (dy * CS) / 2);
+          wallGeos.push(w);
+        }
+      }
+    }
+
+    const group = new THREE.Group();
+    const addMerged = (geos: THREE.BufferGeometry[], mat: THREE.Material): void => {
+      if (!geos.length) return;
+      const merged = mergeGeometries(geos, false);
+      if (!merged) return;
+      const uv = merged.getAttribute("uv");
+      if (uv && !merged.getAttribute("uv1")) merged.setAttribute("uv1", uv);
+      group.add(new THREE.Mesh(merged, mat));
+    };
+    addMerged(floorGeos, floorMat);
+    addMerged(ceilGeos, ceilMat);
+    addMerged(wallGeos, wallMat);
+    this.scene.add(group);
+
+    // skylights cut into the ceiling
+    for (const s of d.sky ?? []) {
+      const cx = s.x * CS;
+      const cz = s.y * CS;
+      const cap = new THREE.Mesh(
+        new THREE.PlaneGeometry(CS, CS),
+        new THREE.MeshBasicMaterial({ map: canvasTex(makeSkyCanvas(128), true), toneMapped: false })
+      );
+      cap.rotation.x = Math.PI / 2;
+      cap.position.set(cx, HH + 0.9, cz);
+      group.add(cap);
+      const l = new THREE.PointLight(0xbcd4ff, 30, 18, 2);
+      l.position.set(cx, HH + 0.4, cz);
+      group.add(l);
+    }
+
+    // torches
+    const glowTex = canvasTex(makeGlowCanvas(128), true);
+    let ti = 0;
+    for (const L of d.lights ?? []) {
+      const x = L.x * CS + L.dx * (CS / 2 - 0.16);
+      const z = L.y * CS + L.dy * (CS / 2 - 0.16);
+      const flame = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: glowTex,
+          color: 0xffb060,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          transparent: true,
+          toneMapped: false,
+        })
+      );
+      flame.scale.set(0.5, 0.72, 1);
+      flame.position.set(x, 2.86, z);
+      group.add(flame);
+      this.flames.push({ sprite: flame, phase: ti * 1.7, x, y: 2.86, z });
+      ti++;
+    }
+
+    this.scene.add(new THREE.AmbientLight(0x1b2433, 0.45));
+    this.scene.add(new THREE.HemisphereLight(0x2b3a52, 0x07060a, 0.3));
+
+    const N = 600;
+    const dp = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      dp[i * 3] = Math.random() * d.w * CS;
+      dp[i * 3 + 1] = 0.2 + Math.random() * 4.0;
+      dp[i * 3 + 2] = Math.random() * d.h * CS;
+    }
+    this.dustPos = dp;
+    const dustGeo = new THREE.BufferGeometry();
+    dustGeo.setAttribute("position", new THREE.BufferAttribute(dp, 3));
+    this.dust = new THREE.Points(
+      dustGeo,
+      new THREE.PointsMaterial({
+        map: canvasTex(makeDustCanvas(32), true),
+        color: 0xffe4b0,
+        size: 0.03,
+        transparent: true,
+        opacity: 0.35,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        sizeAttenuation: true,
+        toneMapped: false,
+      })
+    );
+    this.scene.add(this.dust);
+  }
+
+  private canStand(px: number, pz: number): boolean {
+    const d = this.grid;
+    if (!d) return true;
+    const gx = Math.round(px / this.gcs);
+    const gy = Math.round(pz / this.gcs);
+    if (gx < 0 || gy < 0 || gx >= d.w || gy >= d.h) return false;
+    return d.tiles[gy * d.w + gx] !== TILE_WALL;
+  }
+
   layout(uiCanvas: HTMLCanvasElement, rectBox = { x: 0, y: 0, w: 384, h: 216 }): void {
     const r = uiCanvas.getBoundingClientRect();
     const sx = r.width / 384;
@@ -463,22 +656,47 @@ export class Hall3D {
     if (input.held("up")) mz += 1;
     if (input.held("down")) mz -= 1;
     if (mz !== 0) {
-      this.pos.x += fx * speed * dt * mz;
-      this.pos.z += fz * speed * dt * mz;
+      const nx = this.pos.x + fx * speed * dt * mz;
+      const nz = this.pos.z + fz * speed * dt * mz;
+      if (this.grid) {
+        if (this.canStand(nx, this.pos.z)) this.pos.x = nx;
+        if (this.canStand(this.pos.x, nz)) this.pos.z = nz;
+      } else {
+        this.pos.x = nx;
+        this.pos.z = nz;
+      }
     }
-    const lx = HALF - 0.55;
     const bob = 0.02 * Math.sin(this.t * 9) * (mz !== 0 ? 1 : 0);
-    this.pos.x = Math.max(-lx, Math.min(lx, this.pos.x));
-    this.pos.z = Math.max(Z1 + 1.4, Math.min(Z0 - 0.6, this.pos.z));
+    if (!this.grid) {
+      const lx = HALF - 0.55;
+      this.pos.x = Math.max(-lx, Math.min(lx, this.pos.x));
+      this.pos.z = Math.max(Z1 + 1.4, Math.min(Z0 - 0.6, this.pos.z));
+    }
     this.camera.position.set(this.pos.x, 1.62 + bob, this.pos.z);
     this.camera.rotation.set(0, this.yaw, 0);
 
+    const camx = this.pos.x;
+    const camz = this.pos.z;
+    const nearest = this.flames
+      .map((f, idx) => ({ f, idx, d2: (f.x - camx) ** 2 + (f.z - camz) ** 2 }))
+      .sort((a, b) => a.d2 - b.d2);
+    for (let i = 0; i < this.lightPool.length; i++) {
+      const l = this.lightPool[i];
+      if (i < nearest.length) {
+        const f = nearest[i].f;
+        const fl = 0.78 + 0.22 * Math.sin(this.t * 15 + f.phase) + 0.1 * Math.sin(this.t * 37 + f.phase * 2.1);
+        l.position.set(f.x, f.y, f.z);
+        l.intensity = 9 * fl;
+      } else {
+        l.intensity = 0;
+      }
+    }
     for (const f of this.flames) {
       const fl = 0.78 + 0.22 * Math.sin(this.t * 15 + f.phase) + 0.1 * Math.sin(this.t * 37 + f.phase * 2.1);
-      f.light.intensity = 9 * fl;
       const s = 0.46 + 0.09 * fl;
       f.sprite.scale.set(s, s * 1.45, 1);
-      f.sprite.position.y = 2.86 + 0.02 * Math.sin(this.t * 21 + f.phase);
+      f.sprite.position.y = f.y + 0.02 * Math.sin(this.t * 21 + f.phase);
+      f.sprite.visible = (f.x - camx) ** 2 + (f.z - camz) ** 2 < 900;
     }
 
     if (this.dustPos && this.dust) {
@@ -515,12 +733,12 @@ export class Hall3D {
 export class HallScene implements Scene {
   private hall: Hall3D | null = null;
 
-  constructor(private host: Host) {}
+  constructor(private host: Host, private dungeon?: Dungeon) {}
 
   glRender(viewEl: HTMLCanvasElement, uiCanvas: HTMLCanvasElement): void {
     if (!this.hall) {
       try {
-        this.hall = new Hall3D(viewEl);
+        this.hall = new Hall3D(viewEl, this.dungeon);
       } catch (err) {
         document.title = "HALLERR " + (err as Error).message;
         this.hall = null;

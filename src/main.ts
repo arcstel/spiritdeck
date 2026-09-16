@@ -3,6 +3,7 @@ import { Dungeon, TILE_WALL, addAmbiance, generateDungeon, makeParty } from "./d
 import { HallScene } from "./hall";
 import { DungeonScene, Host, TitleScene, VIEW } from "./scenes";
 import { View3D, ViewState } from "./view3d";
+import { initModelAtlas, renderModelAtlas } from "./models";
 
 /** A fixed cross-shaped corridor used only to eyeball the renderer. */
 function makeTestDungeon(): Dungeon {
@@ -20,6 +21,7 @@ const canvasEl = document.getElementById("c") as HTMLCanvasElement;
 const viewEl = document.getElementById("view") as HTMLCanvasElement;
 const gc = new GameCanvas(canvasEl);
 const input = new Input();
+initModelAtlas();
 
 const params = new URLSearchParams(location.search);
 const mode = params.get("scene");
@@ -47,6 +49,8 @@ const host: Host = {
 let current: Scene;
 if (mode === "hall") {
   current = new HallScene(host);
+} else if (mode === "floor") {
+  current = new HallScene(host, host.dungeon);
 } else if (mode === "dungeon" || mode === "testroom") {
   const ds = new DungeonScene(host);
   const pose = params.get("pose");
@@ -62,6 +66,7 @@ if (mode === "hall") {
 startLoop(
   (dt) => {
     try {
+      renderModelAtlas(dt);
       current.update(dt, input);
       input.endFrame();
     } catch (err) {

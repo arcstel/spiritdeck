@@ -13,6 +13,7 @@ import {
 } from "./data";
 import { makeCeilingTexture, makeFloorTexture, makeWallTexture, Tex } from "./textures";
 import { mulberry32 } from "./engine";
+import { MODEL_SIZE, getModelAtlas, modelSlot } from "./models";
 
 export const C = {
   bg: "#08080e",
@@ -444,7 +445,8 @@ export function drawHoloBox(
   x: number,
   y: number,
   w: number,
-  h: number
+  h: number,
+  memberId?: string
 ): void {
   const t = performance.now() / 1000;
   const im = frameImage();
@@ -470,9 +472,9 @@ export function drawHoloBox(
     ih = h - insetY * 2;
   }
 
-  const sc = scratch(w, h);
-  sc.g.clearRect(0, 0, w, h);
-  drawPortrait(sc.g, kind, 0, 0, w, h, el);
+  const atlas = getModelAtlas();
+  const slot = memberId !== undefined ? modelSlot(memberId) : -1;
+  const useModel = !!atlas && atlas.ready && slot >= 0;
 
   ctx.save();
   ctx.beginPath();
@@ -481,11 +483,21 @@ export function drawHoloBox(
 
   ctx.globalAlpha = 0.95;
   ctx.globalCompositeOperation = "source-over";
-  ctx.drawImage(sc.c, 0, 0, w, h, ix, iy, iw, ih);
-
-  ctx.globalCompositeOperation = "lighter";
-  ctx.globalAlpha = 0.45;
-  ctx.drawImage(sc.c, 0, 0, w, h, ix, iy, iw, ih);
+  if (useModel && atlas) {
+    const sx = slot * MODEL_SIZE;
+    ctx.drawImage(atlas.canvas, sx, 0, MODEL_SIZE, MODEL_SIZE, ix, iy, iw, ih);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = 0.5;
+    ctx.drawImage(atlas.canvas, sx, 0, MODEL_SIZE, MODEL_SIZE, ix, iy, iw, ih);
+  } else {
+    const sc = scratch(w, h);
+    sc.g.clearRect(0, 0, w, h);
+    drawPortrait(sc.g, kind, 0, 0, w, h, el);
+    ctx.drawImage(sc.c, 0, 0, w, h, ix, iy, iw, ih);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = 0.45;
+    ctx.drawImage(sc.c, 0, 0, w, h, ix, iy, iw, ih);
+  }
 
   ctx.globalCompositeOperation = "screen";
   ctx.globalAlpha = 0.25;
@@ -522,7 +534,7 @@ export function drawMemberCard(
   frame(ctx, x, y, w, h, active ? C.panelHi : C.panel, active ? C.gold : C.bevelHi, C.bevelLo);
   const portW = w - 8;
   const portH = Math.floor(h * 0.46);
-  drawHoloBox(ctx, m.art, m.element, x + 4, y + 4, portW, portH);
+  drawHoloBox(ctx, m.art, m.element, x + 4, y + 4, portW, portH, m.id);
 
   text(ctx, m.name, x + 4, y + portH + 6, active ? C.gold : C.text, 8);
   text(ctx, `L${m.lv}`, x + w - 4 - textWidth(ctx, `L${m.lv}`), y + portH + 6, C.dim, 8);
