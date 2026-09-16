@@ -52,24 +52,79 @@ const ENCOUNTERS = true;
 
 export class TitleScene implements Scene {
   private t = 0;
+  private video: HTMLVideoElement | null = null;
+  private videoTried = false;
+
   constructor(private host: Host) {}
+
+  private ensureVideo(): void {
+    if (this.videoTried) return;
+    this.videoTried = true;
+    try {
+      const v = document.createElement("video");
+      v.src = `${import.meta.env.BASE_URL}video/title.mp4`;
+      v.loop = true;
+      v.muted = true;
+      v.autoplay = true;
+      v.playsInline = true;
+      v.preload = "auto";
+      v.setAttribute("muted", "");
+      v.style.position = "absolute";
+      v.style.width = "1px";
+      v.style.height = "1px";
+      v.style.opacity = "0";
+      v.style.pointerEvents = "none";
+      document.body.appendChild(v);
+      const p = v.play();
+      if (p && typeof p.catch === "function") p.catch(() => undefined);
+      this.video = v;
+    } catch {
+      this.video = null;
+    }
+  }
 
   update(dt: number, input: Input): void {
     this.t += dt;
+    this.ensureVideo();
+    if (this.video && this.video.paused) {
+      const p = this.video.play();
+      if (p && typeof p.catch === "function") p.catch(() => undefined);
+    }
     if (input.justPressed("confirm")) this.host.setScene(new HallScene(this.host, this.host.dungeon));
   }
 
   render(ctx: CanvasRenderingContext2D): void {
-    rect(ctx, 0, 0, 256, 224, C.bg);
-    for (let y = 20; y < 120; y += 4) {
-      const a = 0.06 + 0.05 * Math.sin((y + this.t * 30) * 0.2);
-      rect(ctx, 0, y, 256, 2, `rgba(200,140,60,${a.toFixed(3)})`);
+    const v = this.video;
+    const ready = v && v.readyState >= 2 && v.videoWidth > 0;
+    ctx.canvas.style.imageRendering = "auto";
+    if (ready) {
+      // video is 16:9, identical to the 384x216 canvas: draw full-bleed
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(v!, 0, 0, 384, 216);
+      ctx.imageSmoothingEnabled = false;
+      // legibility gradients top and bottom
+      const gTop = ctx.createLinearGradient(0, 0, 0, 40);
+      gTop.addColorStop(0, "rgba(4,4,10,0.75)");
+      gTop.addColorStop(1, "rgba(4,4,10,0)");
+      ctx.fillStyle = gTop;
+      ctx.fillRect(0, 0, 384, 40);
+      const gBot = ctx.createLinearGradient(0, 170, 0, 216);
+      gBot.addColorStop(0, "rgba(4,4,10,0)");
+      gBot.addColorStop(1, "rgba(4,4,10,0.85)");
+      ctx.fillStyle = gBot;
+      ctx.fillRect(0, 170, 384, 46);
+    } else {
+      rect(ctx, 0, 0, 256, 224, C.bg);
+      for (let y = 20; y < 120; y += 4) {
+        const a = 0.06 + 0.05 * Math.sin((y + this.t * 30) * 0.2);
+        rect(ctx, 0, y, 256, 2, `rgba(200,140,60,${a.toFixed(3)})`);
+      }
+      textCenter(ctx, "S P I R I T D E C K", 192, 62, C.gold, 16);
+      textCenter(ctx, "Arcanaetheum", 192, 84, C.dim, 8);
     }
-    textCenter(ctx, "S P I R I T D E C K", 192, 62, C.gold, 16);
-    textCenter(ctx, "a first-person deck-delve", 192, 84, C.dim, 8);
-    if (Math.floor(this.t * 2) % 2 === 0) textCenter(ctx, "PRESS  ENTER", 192, 140, C.text, 8);
-    textCenter(ctx, "arrows / WASD   M map   E foes   Z confirm   X cancel", 192, 198, C.dim, 8);
-    textCenter(ctx, VERSION, 256, 208, C.dim, 8);
+    if (Math.floor(this.t * 2) % 2 === 0) textCenter(ctx, "PRESS  ENTER", 192, 176, "#ffe9b0", 8);
+    textCenter(ctx, "arrows / WASD   M map   E foes   Z confirm   X cancel", 192, 200, C.dim, 8);
+    textCenter(ctx, VERSION, 192, 210, C.dim, 8);
   }
 }
 
@@ -203,6 +258,7 @@ export class DungeonScene implements Scene {
   }
 
   render(ctx: CanvasRenderingContext2D): void {
+    ctx.canvas.style.imageRendering = "pixelated";
     rect(ctx, 0, 0, 256, 224, C.bg);
     const ox = this.shake > 0 ? (Math.random() < 0.5 ? -1 : 1) : 0;
 
@@ -583,6 +639,7 @@ export class BattleScene implements Scene {
   }
 
   render(ctx: CanvasRenderingContext2D): void {
+    ctx.canvas.style.imageRendering = "pixelated";
     rect(ctx, 0, 0, 256, 224, C.bg);
     const ox = this.shake > 0 ? (Math.random() < 0.5 ? -1 : 1) : 0;
     ctx.save();

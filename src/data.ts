@@ -262,6 +262,7 @@ export const TILE_DOOR = 5;
 export const TILE_KEY = 6;
 export const TILE_VAULT = 7;
 export const TILE_EXIT = 8;
+export const TILE_EXIT2 = 9;
 
 /** Tiles that block movement (and sight beyond, except bars which see through). */
 export function isSolid(t: number): boolean {
@@ -471,6 +472,10 @@ export function generateDungeon(seed: number): Dungeon {
     if (bx >= 0) {
       tiles[by * w + bx] = TILE_EXIT;
       exitPos = { x: bx, y: by };
+      // spawn facing the surface gate
+      const dx = bx - start.x;
+      const dy = by - start.y;
+      start.dir = Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? 1 : 3) : dy > 0 ? 2 : 0;
     }
   }
 
@@ -607,6 +612,37 @@ export function generateDungeon(seed: number): Dungeon {
   const decor: Decor[] = [];
   const mid = rooms.slice(1, -1);
 
+  // cells either side of a room's corridor entrance (for flanking statues)
+  const entryFlanks = (r: Room): [number, number][] => {
+    for (let y = r.y; y < r.y + r.h; y++) {
+      for (let x = r.x; x < r.x + r.w; x++) {
+        for (const v of DIR_VEC) {
+          const nx = x + v.x;
+          const ny = y + v.y;
+          if (nx >= r.x && nx < r.x + r.w && ny >= r.y && ny < r.y + r.h) continue;
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+          if (isSolid(tiles[ny * w + nx]) || inAnyRoom(nx, ny)) continue;
+          const px = v.y;
+          const py = v.x;
+          const a: [number, number] = [x + px, y + py];
+          const b: [number, number] = [x - px, y - py];
+          const okA =
+            a[0] >= r.x && a[0] < r.x + r.w && a[1] >= r.y && a[1] < r.y + r.h && tiles[a[1] * w + a[0]] === TILE_FLOOR;
+          const okB =
+            b[0] >= r.x && b[0] < r.x + r.w && b[1] >= r.y && b[1] < r.y + r.h && tiles[b[1] * w + b[0]] === TILE_FLOOR;
+          if (okA && okB) return [a, b];
+        }
+      }
+    }
+    return [];
+  };
+
+  // the entry room and the stair room always get flanking gargoyles
+  for (const r of [rooms[0], rooms[rooms.length - 1]]) {
+    if (!r) continue;
+    for (const [x, y] of entryFlanks(r)) decor.push({ kind: "gargoyle", x, y, dx: 0, dy: 0 });
+  }
+
   // two gargoyles framing the surface exit (so the gate is flanked)
   if (exitPos) {
     const horiz = Math.abs(exitPos.x - start.x) >= Math.abs(exitPos.y - start.y);
@@ -640,32 +676,7 @@ export function generateDungeon(seed: number): Dungeon {
         }
       }
     } else if (roll < 0.52) {
-      // gargoyles flanking the room's corridor entry
-      let flanks: [number, number][] = [];
-      outer: for (let y = r.y; y < r.y + r.h; y++) {
-        for (let x = r.x; x < r.x + r.w; x++) {
-          for (const v of DIR_VEC) {
-            const nx = x + v.x;
-            const ny = y + v.y;
-            if (nx >= r.x && nx < r.x + r.w && ny >= r.y && ny < r.y + r.h) continue;
-            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
-            if (isSolid(tiles[ny * w + nx]) || inAnyRoom(nx, ny)) continue;
-            const px = v.y;
-            const py = v.x;
-            const a: [number, number] = [x + px, y + py];
-            const b: [number, number] = [x - px, y - py];
-            const okA =
-              a[0] >= r.x && a[0] < r.x + r.w && a[1] >= r.y && a[1] < r.y + r.h && tiles[a[1] * w + a[0]] === TILE_FLOOR;
-            const okB =
-              b[0] >= r.x && b[0] < r.x + r.w && b[1] >= r.y && b[1] < r.y + r.h && tiles[b[1] * w + b[0]] === TILE_FLOOR;
-            if (okA && okB) {
-              flanks = [a, b];
-              break outer;
-            }
-          }
-        }
-      }
-      for (const [x, y] of flanks) decor.push({ kind: "gargoyle", x, y, dx: 0, dy: 0 });
+      for (const [x, y] of entryFlanks(r)) decor.push({ kind: "gargoyle", x, y, dx: 0, dy: 0 });
     } else if (roll < 0.8) {
       const n = 1 + ri(2);
       for (let i = 0; i < n; i++) {
@@ -815,12 +826,12 @@ export function generateTown(seed: number): Dungeon {
 
   // buildings facing the plaza
   add("inn", cx - 4, 2, "inn_hd", 0);
-  add("inn", cx + 4, 2, "tavern", 0);
+  add("inn", cx + 4, 2, "town_house_A", Math.PI);
   add("blacksmith", 2, cy, "blacksmith_hd", Math.PI / 2);
   add("magician", w - 3, cy, "magic_shop_hd", -Math.PI / 2);
-  add("prop", cx - 4, h - 3, "general_store", 0);
+  add("prop", cx - 4, h - 3, "town_house_A", 0);
   add("prop", cx + 4, h - 3, "town_house_A", rng() < 0.5 ? 0 : Math.PI);
-  add("prop", 2, 3, "town_house_B", Math.PI / 2 + (rng() < 0.5 ? 0 : Math.PI));
+  add("prop", 2, 3, "town_house_A", Math.PI / 2 + (rng() < 0.5 ? 0 : Math.PI));
   add("prop", w - 3, 3, "town_house_A", -Math.PI / 2);
 
   // market stalls on the plaza edge
@@ -828,7 +839,7 @@ export function generateTown(seed: number): Dungeon {
   add("stall", cx + 2, cy - 3, "merchant_stall", Math.PI);
   add("stall", cx - 3, cy, "cloth_stall", Math.PI / 2);
   add("stall", cx + 3, cy, "potion_stall", -Math.PI / 2);
-  add("stall", cx, cy + 3, "general_goods_stall", 0);
+  add("stall", cx + 1, cy + 3, "general_goods_stall", 0);
   add("stall", cx - 3, cy + 2, "food_stall", Math.PI / 2);
 
   // plaza centrepiece (dry fountain)
@@ -851,10 +862,13 @@ export function generateTown(seed: number): Dungeon {
   add("prop", cx + 4, cy + 3, "wood_fence", 0);
   add("prop", cx - 4, cy - 2, "wood_fence", 0);
   add("prop", cx + 4, cy - 3, "cart", 0.4);
-  add("prop", cx - 1, h - 3, "signpost");
+  add("prop", cx - 2, h - 2, "signpost");
+  add("prop", cx - 2, 2, "signpost");
 
   // south gate back out to the world map
   tiles[(h - 2) * w + cx] = TILE_EXIT;
+  // north road (marked) straight back down into the dungeon
+  tiles[1 * w + cx] = TILE_EXIT2;
 
   const start = { x: cx, y: h - 4, dir: 0 };
   return { name: "Market Town", w, h, tiles, start, decor, kind: "town" };

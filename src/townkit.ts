@@ -50,6 +50,9 @@ export function loadTownKit(): void {
       (gltf) => {
         const root = gltf.scene;
         root.rotation.x = -Math.PI / 2;
+        if (name === "town_wall_straight" || name === "town_wall_gate") {
+          root.scale.set(8 / 10.27, 1, 1);
+        }
         root.traverse((o) => {
           const m = o as THREE.Mesh;
           if (m.isMesh) {
@@ -65,7 +68,10 @@ export function loadTownKit(): void {
             }
           }
         });
-        cache.set(name, root);
+        // wrap so the Z-up correction lives inside a clean yaw pivot
+        const pivot = new THREE.Group();
+        pivot.add(root);
+        cache.set(name, pivot);
         remaining--;
       },
       undefined,

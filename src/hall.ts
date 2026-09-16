@@ -11,6 +11,7 @@ import {
   TILE_CHEST,
   TILE_DOOR,
   TILE_EXIT,
+  TILE_EXIT2,
   TILE_KEY,
   TILE_STAIRS,
   TILE_VAULT,
@@ -1041,6 +1042,7 @@ export class Hall3D {
   private blocks = new Set<number>();
   private doorMeshes = new Map<number, THREE.Object3D>();
   private exitCell: [number, number] | null = null;
+  private exitCell2: [number, number] | null = null;
   private shops: { kind: string; gx: number; gy: number; name: string }[] = [];
   private kind: "dungeon" | "town" = "dungeon";
   private radius = 0.42;
@@ -1115,6 +1117,11 @@ export class Hall3D {
       return n;
     };
     let dir = s.dir;
+    const sv = DIR_VEC[dir];
+    if (openAt(s.x + sv.x, s.y + sv.y)) {
+      this.yaw = DIR_YAW[dir];
+      return;
+    }
     let best = -1;
     for (let dd = 0; dd < 4; dd++) {
       const v = DIR_VEC[dd];
@@ -1140,6 +1147,7 @@ export class Hall3D {
     this.blocks = new Set();
     this.doorMeshes = new Map();
     this.exitCell = null;
+    this.exitCell2 = null;
     this.props = [];
     this.stepTween = null;
     this.turnTween = null;
@@ -1166,6 +1174,13 @@ export class Hall3D {
 
   exit(): [number, number] | null {
     return this.exitCell;
+  }
+
+  /** Which way an exit tile leads, if the player is standing on one. */
+  exitAt(gx: number, gy: number): "map" | "dungeon" | null {
+    if (this.exitCell && this.exitCell[0] === gx && this.exitCell[1] === gy) return "map";
+    if (this.exitCell2 && this.exitCell2[0] === gx && this.exitCell2[1] === gy) return "dungeon";
+    return null;
   }
 
   isTown(): boolean {
@@ -1195,6 +1210,7 @@ export class Hall3D {
     this.blocks = new Set();
     this.doorMeshes = new Map();
     this.exitCell = null;
+    this.exitCell2 = null;
     this.shops = [];
     this.props = [];
     this.stepTween = null;
@@ -1266,12 +1282,6 @@ export class Hall3D {
       const rot = dc.rot ?? 0;
       const name = dc.model ?? "";
       const m = name ? townModel(name) : null;
-      if (m && (name === "town_wall_straight" || name === "town_wall_gate")) {
-        m.scale.set((CS * 2) / 10.27, 1, 1);
-      }
-      if (m && name === "cobblestone_square") {
-        m.scale.set(CS / 8, CS / 8, 1);
-      }
       if (m) {
         put(m, dc.x, dc.y, rot);
       } else {
@@ -1289,21 +1299,81 @@ export class Hall3D {
         else if (dc.kind === "prop") put(makeCrate(), dc.x, dc.y, rot);
       }
 
-      if (dc.kind === "inn" || dc.kind === "blacksmith" || dc.kind === "magician" || dc.kind === "prop") {
+      if (
+        name === "inn_hd" ||
+        name === "blacksmith_hd" ||
+        name === "magic_shop_hd" ||
+        name === "inn" ||
+        name === "tavern" ||
+        name === "general_store" ||
+        name === "town_house_A" ||
+        name === "town_house_B"
+      ) {
         const hd = name.endsWith("_hd");
-        const a = hd ? 5.4 : 5;
-        const b = hd ? 4.8 : 3.3;
         const along = Math.abs(Math.cos(rot)) > 0.5;
-        this.blockRect(dc.x, dc.y, along ? a : b, along ? b : a);
-      } else if (dc.kind === "stall" || dc.kind === "crate" || dc.kind === "well") {
-        this.blockRect(dc.x, dc.y, 0.5, 0.5);
+        const hx = hd ? 5.0 : 4.9;
+        const hz = hd ? 4.6 : 2.9;
+        this.blockRect(dc.x, dc.y, along ? hx : hz, along ? hz : hx);
+      } else if (name === "well" || name === "town_fountain") {
+        this.blockRect(dc.x, dc.y, 1.2, 1.2);
+      } else if (
+        name === "food_stall" ||
+        name === "merchant_stall" ||
+        name === "cloth_stall" ||
+        name === "potion_stall" ||
+        name === "general_goods_stall"
+      ) {
+        this.blockRect(dc.x, dc.y, 1.9, 1.4);
+      } else if (name === "cart" || name === "wood_fence" || name === "crate_stack" || name === "barrel_cluster" || name === "hay_bale") {
+        this.blockRect(dc.x, dc.y, 1.0, 0.8);
       }
 
       if (dc.kind === "inn" && name) {
-        const sign = makeSignBoard(name === "inn" ? "INN" : "TAVERN");
+        const sign = makeSignBoard(name === "inn_hd" ? "INN" : "TAVERN");
         sign.position.set(dc.x * CS + 3.2, 3.0, dc.y * CS + 3.2);
         sign.rotation.y = -Math.PI / 4;
         this.scene.add(sign);
+      }
+      if (dc.kind === "blacksmith") {
+        const sign = makeSignBoard("SMITH");
+        sign.position.set(dc.x * CS + 4.4, 3.2, dc.y * CS - 3.2);
+        sign.rotation.y = Math.PI / 4;
+        this.scene.add(sign);
+        const forge = new THREE.PointLight(0xff5a1e, 9, 12, 2);
+        forge.position.set(dc.x * CS + 4.5, 1.6, dc.y * CS);
+        this.scene.add(forge);
+        const anvil = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.24, 0.34), matIron());
+        anvil.position.set(dc.x * CS + 5.6, 0.7, dc.y * CS + 1.6);
+        this.scene.add(anvil);
+        const stump = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.36, 0.6, 10), matWood());
+        stump.position.set(dc.x * CS + 5.6, 0.3, dc.y * CS + 1.6);
+        this.scene.add(stump);
+      }
+      if (dc.kind === "magician") {
+        const sign = makeSignBoard("MAGE");
+        sign.position.set(dc.x * CS - 4.4, 3.2, dc.y * CS - 3.2);
+        sign.rotation.y = -Math.PI / 4;
+        this.scene.add(sign);
+        const glow = new THREE.PointLight(0x9a5aff, 8, 12, 2);
+        glow.position.set(dc.x * CS - 4.6, 2.0, dc.y * CS);
+        this.scene.add(glow);
+        const crystalMat = new THREE.MeshStandardMaterial({
+          color: 0x8a5cff,
+          emissive: 0x6a3cff,
+          emissiveIntensity: 1.1,
+          roughness: 0.3,
+          metalness: 0.1,
+        });
+        for (const [ox, oz, sc] of [
+          [-5.2, 1.4, 1.0],
+          [-5.6, 0.2, 0.7],
+          [-4.9, -1.2, 0.85],
+        ] as [number, number, number][]) {
+          const c = new THREE.Mesh(new THREE.ConeGeometry(0.26 * sc, 1.1 * sc, 6), crystalMat);
+          c.position.set(dc.x * CS + ox, 0.55 * sc, dc.y * CS + oz);
+          c.rotation.z = (ox % 0.3) * 0.5;
+          this.scene.add(c);
+        }
       }
       if (dc.kind === "lamp") {
         const l = new THREE.PointLight(0xffc070, 5, 12, 2);
@@ -1317,7 +1387,9 @@ export class Hall3D {
 
     for (let gy = 0; gy < d.h; gy++) {
       for (let gx = 0; gx < d.w; gx++) {
-        if (d.tiles[gy * d.w + gx] === TILE_EXIT) this.exitCell = [gx, gy];
+        const tv = d.tiles[gy * d.w + gx];
+        if (tv === TILE_EXIT) this.exitCell = [gx, gy];
+        else if (tv === TILE_EXIT2) this.exitCell2 = [gx, gy];
       }
     }
   }
@@ -1328,6 +1400,9 @@ export class Hall3D {
     const p = this.props[idx];
     p.obj.removeFromParent();
     this.props.splice(idx, 1);
+    if ((p.type === "chest" || p.type === "key") && this.grid) {
+      this.grid.tiles[p.gy * this.grid.w + p.gx] = 0;
+    }
     return p.type;
   }
 
@@ -1791,12 +1866,13 @@ export class Hall3D {
           g.rotation.y = passageRot(gx, gy);
           group.add(g);
           this.doorMeshes.set(cellIdx(gx, gy), g);
-        } else if (t === TILE_EXIT) {
+        } else if (t === TILE_EXIT || t === TILE_EXIT2) {
           const g = makeExitGate();
           g.position.set(cx, 0, cz);
           g.rotation.y = Math.atan2(d.start.x - gx, d.start.y - gy);
           group.add(g);
-          this.exitCell = [gx, gy];
+          if (t === TILE_EXIT) this.exitCell = [gx, gy];
+          else this.exitCell2 = [gx, gy];
         }
       }
     }
@@ -2235,11 +2311,12 @@ export class HallScene implements Scene {
     if (this.hall) {
       const [gx, gy] = this.hall.cell();
       const cellKey = gx + "," + gy;
-      const ex = this.hall.exit();
+      const ex = this.hall.exitAt(gx, gy);
       if (cellKey !== this.lastCell) {
         this.lastCell = cellKey;
-        if (ex && ex[0] === gx && ex[1] === gy) {
-          this.enterMap(inTown ? 1 : 0);
+        if (ex) {
+          if (ex === "dungeon") this.toDungeon();
+          else this.enterMap(inTown ? 1 : 0);
           return;
         }
         if (inTown && input.justPressed("confirm")) {
@@ -2332,6 +2409,17 @@ export class HallScene implements Scene {
     });
     this.msg = [`${monsters.length} cards are dealt!`];
     this.host.setScene(scene);
+  }
+
+  private toDungeon(): void {
+    const d = this.dungeon ?? generateDungeon((Math.random() * 1e9) | 0);
+    this.dungeon = d;
+    this.world = "dungeon";
+    this.lastCell = "";
+    this.showMap = false;
+    this.keys = 0;
+    if (this.hall) this.hall.reset(d);
+    this.msg = ["You follow the road back down into the vault."];
   }
 
   private enterMap(marker = 0): void {
@@ -2429,6 +2517,7 @@ export class HallScene implements Scene {
   }
 
   render(ctx: CanvasRenderingContext2D): void {
+    ctx.canvas.style.imageRendering = "pixelated";
     if (this.world === "map") {
       this.drawMapView(ctx);
       return;

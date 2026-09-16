@@ -36,7 +36,9 @@ export function loadGargoyleKit(): void {
             }
           }
         });
-        cache.set(name, root);
+        const pivot = new THREE.Group();
+        pivot.add(root);
+        cache.set(name, pivot);
         remaining--;
       },
       undefined,
