@@ -250,6 +250,7 @@ export interface Dungeon {
   lights?: TorchLight[];
   sky?: SkyLight[];
   decor?: Decor[];
+  kind?: "dungeon" | "town";
 }
 
 export const TILE_FLOOR = 0;
@@ -260,6 +261,7 @@ export const TILE_BARS = 4;
 export const TILE_DOOR = 5;
 export const TILE_KEY = 6;
 export const TILE_VAULT = 7;
+export const TILE_EXIT = 8;
 
 /** Tiles that block movement (and sight beyond, except bars which see through). */
 export function isSolid(t: number): boolean {
@@ -278,7 +280,19 @@ export type DecorKind =
   | "barrel"
   | "web"
   | "chain"
-  | "grate";
+  | "grate"
+  | "inn"
+  | "blacksmith"
+  | "magician"
+  | "stall"
+  | "tent"
+  | "crate"
+  | "well"
+  | "lamp"
+  | "banner"
+  | "prop"
+  | "wall"
+  | "gate";
 
 /** Decorative prop. For wall-mounted kinds, (x,y) is the wall cell and
  *  (dx,dy) points from the wall into the open room. */
@@ -288,6 +302,8 @@ export interface Decor {
   y: number;
   dx: number;
   dy: number;
+  model?: string;
+  rot?: number;
 }
 
 /** Kinds the player cannot walk through (placed only in open rooms). */
@@ -432,6 +448,26 @@ export function generateDungeon(seed: number): Dungeon {
   const start = { x: startRoom.cx, y: startRoom.cy, dir: 1 };
   const last = rooms[rooms.length - 1];
   tiles[last.cy * w + last.cx] = TILE_STAIRS;
+
+  // the way back out to the world map, in the entry room
+  {
+    let bx = -1;
+    let by = -1;
+    let best = 99;
+    for (let y = startRoom.y; y < startRoom.y + startRoom.h; y++) {
+      for (let x = startRoom.x; x < startRoom.x + startRoom.w; x++) {
+        if (x === start.x && y === start.y) continue;
+        if (tiles[y * w + x] !== TILE_FLOOR) continue;
+        const dd = Math.abs(x - start.x) + Math.abs(y - start.y);
+        if (dd < best) {
+          best = dd;
+          bx = x;
+          by = y;
+        }
+      }
+    }
+    if (bx >= 0) tiles[by * w + bx] = TILE_EXIT;
+  }
 
   const doors: { x: number; y: number }[] = [];
 
@@ -714,6 +750,89 @@ export function generateDungeon(seed: number): Dungeon {
 
   dungeon.decor = decor;
   return dungeon;
+}
+
+/**
+ * A small walled town: an open cobbled grid (all walkable) with a boundary
+ * wall, a central plaza, and buildings/stalls laid out as decor props.
+ */
+export function generateTown(seed: number): Dungeon {
+  const w = 15;
+  const h = 15;
+  const tiles = new Uint8Array(w * h).fill(TILE_FLOOR);
+  const rng = mulberry32(seed);
+  for (let x = 0; x < w; x++) {
+    tiles[x] = TILE_WALL;
+    tiles[(h - 1) * w + x] = TILE_WALL;
+  }
+  for (let y = 0; y < h; y++) {
+    tiles[y * w] = TILE_WALL;
+    tiles[y * w + w - 1] = TILE_WALL;
+  }
+
+  const decor: Decor[] = [];
+  const add = (kind: DecorKind, x: number, y: number, model: string, rot = 0) =>
+    decor.push({ kind, x, y, dx: 0, dy: 0, model, rot });
+
+  const cx = Math.floor(w / 2);
+  const cy = Math.floor(h / 2);
+
+  // perimeter walls (skip the south-centre gate)
+  for (let x = 1; x < w - 1; x += 2) {
+    add("wall", x, 0, "town_wall_straight", 0);
+    if (x !== cx) add("wall", x, h - 1, "town_wall_straight", 0);
+  }
+  add("gate", cx, h - 1, "town_wall_gate", 0);
+  for (let y = 1; y < h - 1; y += 2) {
+    add("wall", 0, y, "town_wall_straight", Math.PI / 2);
+    add("wall", w - 1, y, "town_wall_straight", Math.PI / 2);
+  }
+
+  // buildings facing the plaza
+  add("inn", cx - 4, 2, "inn", 0);
+  add("inn", cx + 4, 2, "tavern", 0);
+  add("blacksmith", 2, cy, "blacksmith_shop", Math.PI / 2);
+  add("magician", w - 3, cy, "magic_shop", -Math.PI / 2);
+  add("prop", cx - 4, h - 3, "general_store", 0);
+  add("prop", cx + 4, h - 3, "town_house_A", rng() < 0.5 ? 0 : Math.PI);
+  add("prop", 2, 3, "town_house_B", Math.PI / 2 + (rng() < 0.5 ? 0 : Math.PI));
+  add("prop", w - 3, 3, "town_house_A", -Math.PI / 2);
+
+  // market stalls on the plaza edge
+  add("stall", cx - 2, cy - 3, "food_stall", Math.PI);
+  add("stall", cx + 2, cy - 3, "merchant_stall", Math.PI);
+  add("stall", cx - 3, cy, "cloth_stall", Math.PI / 2);
+  add("stall", cx + 3, cy, "potion_stall", -Math.PI / 2);
+  add("stall", cx, cy + 3, "general_goods_stall", 0);
+  add("stall", cx - 3, cy + 2, "food_stall", Math.PI / 2);
+
+  // plaza centrepiece (dry fountain)
+  add("well", cx, cy, "town_fountain");
+
+  // street furniture
+  for (const [x, y] of [
+    [cx - 3, cy - 3],
+    [cx + 3, cy - 3],
+    [cx - 3, cy + 3],
+    [cx + 3, cy + 3],
+    [cx, cy - 4],
+    [cx, cy + 4],
+  ] as [number, number][]) {
+    add("lamp", x, y, "lamp_post");
+  }
+  add("crate", cx - 2, cy + 4, "crate_stack");
+  add("crate", cx + 2, cy + 4, "barrel_cluster");
+  add("prop", cx - 4, cy + 2, "hay_bale");
+  add("prop", cx + 4, cy + 3, "wood_fence", 0);
+  add("prop", cx - 4, cy - 2, "wood_fence", 0);
+  add("prop", cx + 4, cy - 3, "cart", 0.4);
+  add("prop", cx - 1, h - 3, "signpost");
+
+  // south gate back out to the world map
+  tiles[(h - 2) * w + cx] = TILE_EXIT;
+
+  const start = { x: cx, y: h - 4, dir: 0 };
+  return { name: "Market Town", w, h, tiles, start, decor, kind: "town" };
 }
 
 export const DIR_VEC: { x: number; y: number }[] = [

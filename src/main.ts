@@ -4,6 +4,8 @@ import { HallScene } from "./hall";
 import { DungeonScene, Host, TitleScene, VIEW } from "./scenes";
 import { View3D, ViewState } from "./view3d";
 import { initModelAtlas, renderModelAtlas } from "./models";
+import { loadTownKit } from "./townkit";
+import { loadGargoyleKit } from "./gargoylekit";
 
 /** A fixed cross-shaped corridor used only to eyeball the renderer. */
 function makeTestDungeon(): Dungeon {
@@ -22,6 +24,8 @@ const viewEl = document.getElementById("view") as HTMLCanvasElement;
 const gc = new GameCanvas(canvasEl);
 const input = new Input();
 initModelAtlas();
+loadTownKit();
+loadGargoyleKit();
 
 const params = new URLSearchParams(location.search);
 const mode = params.get("scene");
@@ -51,6 +55,10 @@ if (mode === "hall") {
   current = new HallScene(host);
 } else if (mode === "floor") {
   current = new HallScene(host, host.dungeon);
+} else if (mode === "world") {
+  current = new HallScene(host, host.dungeon);
+} else if (mode === "town") {
+  current = new HallScene(host);
 } else if (mode === "dungeon" || mode === "testroom") {
   const ds = new DungeonScene(host);
   const pose = params.get("pose");
