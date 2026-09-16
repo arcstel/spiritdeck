@@ -4,7 +4,11 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { Input, Scene, mulberry32 } from "./engine";
-import { C, rect, text } from "./render";
+import { C, drawCompass, drawMemberCard, drawMessage, rect, text } from "./render";
+import type { Host } from "./scenes";
+
+const VIEW = { x: 80, y: 6, w: 224, h: 134 };
+const PANEL_W = 76;
 
 /* ------------------------------------------------------------------ */
 /* Layout constants (metres)                                           */
@@ -163,6 +167,8 @@ export class Hall3D {
   private yaw = 0;
   private t = 0;
   private ready = false;
+  private lastW = -1;
+  private lastH = -1;
 
   constructor(private canvas: HTMLCanvasElement) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
@@ -432,12 +438,16 @@ export class Hall3D {
     style.width = `${w}px`;
     style.height = `${h}px`;
     const dpr = Math.min(window.devicePixelRatio || 1, 1.25);
-    this.renderer.setPixelRatio(dpr);
-    this.renderer.setSize(w, h, false);
-    this.composer.setPixelRatio(dpr);
-    this.composer.setSize(w, h);
-    this.camera.aspect = w / h;
-    this.camera.updateProjectionMatrix();
+    if (w !== this.lastW || h !== this.lastH) {
+      this.lastW = w;
+      this.lastH = h;
+      this.renderer.setPixelRatio(dpr);
+      this.renderer.setSize(w, h, false);
+      this.composer.setPixelRatio(dpr);
+      this.composer.setSize(w, h);
+      this.camera.aspect = w / h;
+      this.camera.updateProjectionMatrix();
+    }
   }
 
   update(dt: number, input: Input): void {
@@ -487,6 +497,11 @@ export class Hall3D {
     }
   }
 
+  heading(): number {
+    const d = Math.round(this.yaw / (Math.PI / 2));
+    return ((-d % 4) + 4) % 4;
+  }
+
   render(): void {
     if (!this.ready) return;
     this.composer.render();
@@ -499,7 +514,8 @@ export class Hall3D {
 
 export class HallScene implements Scene {
   private hall: Hall3D | null = null;
-  private hint = "W A S D / arrows  walk  ·  turn with left / right";
+
+  constructor(private host: Host) {}
 
   glRender(viewEl: HTMLCanvasElement, uiCanvas: HTMLCanvasElement): void {
     if (!this.hall) {
@@ -511,7 +527,8 @@ export class HallScene implements Scene {
         return;
       }
     }
-    this.hall.layout(uiCanvas, { x: 0, y: 0, w: 384, h: 216 });
+    this.hall.layout(uiCanvas, VIEW);
+    this.hall.render();
   }
 
   update(dt: number, input: Input): void {
@@ -519,10 +536,25 @@ export class HallScene implements Scene {
   }
 
   render(ctx: CanvasRenderingContext2D): void {
-    this.hall?.render();
-    rect(ctx, 8, 8, 156, 14, "rgba(8,8,14,0.5)");
-    text(ctx, "THE SUNKEN VAULT — B1", 12, 12, C.gold, 8);
-    rect(ctx, 8, 196, 210, 13, "rgba(8,8,14,0.5)");
-    text(ctx, this.hint, 12, 200, C.dim, 8);
+    rect(ctx, 0, 0, 384, 216, C.bg);
+    ctx.clearRect(VIEW.x, VIEW.y, VIEW.w, VIEW.h);
+
+    rect(ctx, VIEW.x - 2, VIEW.y - 2, VIEW.w + 4, 1, C.gold);
+    rect(ctx, VIEW.x - 2, VIEW.y + VIEW.h + 1, VIEW.w + 4, 1, C.gold);
+    rect(ctx, VIEW.x - 2, VIEW.y - 2, 1, VIEW.h + 4, C.gold);
+    rect(ctx, VIEW.x + VIEW.w + 1, VIEW.y - 2, 1, VIEW.h + 4, C.gold);
+
+    drawMemberCard(ctx, this.host.party[0], 0, 4, PANEL_W, 100, false);
+    drawMemberCard(ctx, this.host.party[1], 0, 108, PANEL_W, 100, false);
+    drawMemberCard(ctx, this.host.party[2], 308, 4, PANEL_W, 100, false);
+    drawMemberCard(ctx, this.host.party[3], 308, 108, PANEL_W, 100, false);
+
+    drawCompass(ctx, this.hall ? this.hall.heading() : 0, 192, 124);
+    drawMessage(ctx, VIEW.x, 150, VIEW.w, 62, [
+      "The Sunken Vault — B1.",
+      "",
+      `Gold ${this.host.gold}`,
+    ]);
+    text(ctx, "[M] map", VIEW.x + 4, 141, C.dim, 8);
   }
 }

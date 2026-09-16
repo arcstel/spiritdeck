@@ -24,7 +24,7 @@ const input = new Input();
 const params = new URLSearchParams(location.search);
 const mode = params.get("scene");
 const seed = Number(params.get("seed") ?? 0xc0ffee);
-const v3d = mode === "hall" ? null : new View3D(viewEl);
+const v3d = mode === "dungeon" || mode === "testroom" ? new View3D(viewEl) : null;
 if (v3d) {
   if (params.get("proj") === "rect") v3d.cyl = false;
   if (params.get("proj") === "cyl") v3d.cyl = true;
@@ -46,7 +46,7 @@ const host: Host = {
 
 let current: Scene;
 if (mode === "hall") {
-  current = new HallScene();
+  current = new HallScene(host);
 } else if (mode === "dungeon" || mode === "testroom") {
   const ds = new DungeonScene(host);
   const pose = params.get("pose");

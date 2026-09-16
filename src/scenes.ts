@@ -55,7 +55,7 @@ export class TitleScene implements Scene {
 
   update(dt: number, input: Input): void {
     this.t += dt;
-    if (input.justPressed("confirm")) this.host.setScene(new HallScene());
+    if (input.justPressed("confirm")) this.host.setScene(new HallScene(this.host));
   }
 
   render(ctx: CanvasRenderingContext2D): void {
