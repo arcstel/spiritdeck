@@ -552,6 +552,111 @@ function makeStairwell(): THREE.Group {
   return g;
 }
 
+/** Clay storage urn. */
+function makeUrn(): THREE.Group {
+  const g = new THREE.Group();
+  const clay = new THREE.MeshStandardMaterial({ color: 0x6d4a33, roughness: 0.85, metalness: 0.05 });
+  const prof: [number, number][] = [
+    [0.03, 0],
+    [0.17, 0.02],
+    [0.25, 0.22],
+    [0.29, 0.46],
+    [0.23, 0.7],
+    [0.14, 0.8],
+    [0.18, 0.9],
+    [0.16, 0.96],
+  ];
+  const body = new THREE.Mesh(new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)), 14), clay);
+  g.add(body);
+  const rim = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.02, 6, 14), clay);
+  rim.rotation.x = Math.PI / 2;
+  rim.position.y = 0.96;
+  g.add(rim);
+  return g;
+}
+
+/** Wooden barrel with iron hoops. */
+function makeBarrel(): THREE.Group {
+  const g = new THREE.Group();
+  const wood = new THREE.MeshStandardMaterial({ color: 0x4a3722, roughness: 0.85, metalness: 0.03 });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.82, 12), wood);
+  body.position.y = 0.41;
+  g.add(body);
+  for (const y of [0.12, 0.41, 0.7]) {
+    const hoop = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.022, 6, 14), matIron());
+    hoop.rotation.x = Math.PI / 2;
+    hoop.position.y = y;
+    g.add(hoop);
+  }
+  const lid = new THREE.Mesh(new THREE.CircleGeometry(0.29, 12), wood);
+  lid.rotation.x = -Math.PI / 2;
+  lid.position.y = 0.82;
+  g.add(lid);
+  return g;
+}
+
+function makeWebCanvas(size = 64): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = c.height = size;
+  const x = c.getContext("2d")!;
+  x.clearRect(0, 0, size, size);
+  x.strokeStyle = "rgba(222,228,238,0.9)";
+  x.lineWidth = 1;
+  const cx = size / 2;
+  const cy = size / 2;
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    x.beginPath();
+    x.moveTo(cx, cy);
+    x.lineTo(cx + Math.cos(a) * size * 0.5, cy + Math.sin(a) * size * 0.5);
+    x.stroke();
+  }
+  for (let r = size * 0.09; r < size * 0.5; r += size * 0.085) {
+    x.beginPath();
+    x.arc(cx, cy, r, 0, Math.PI * 2);
+    x.stroke();
+  }
+  return c;
+}
+
+/** Cobwebs hanging in an upper corner. */
+function makeCobweb(): THREE.Group {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshBasicMaterial({
+    map: canvasTex(makeWebCanvas(64), true),
+    transparent: true,
+    opacity: 0.4,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    toneMapped: false,
+  });
+  for (let i = 0; i < 3; i++) {
+    const q = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.3), mat);
+    q.rotation.set(-Math.PI / 2 + 0.35, i * 1.1, 0);
+    q.position.set(0, 3.9 - i * 0.18, 0);
+    g.add(q);
+  }
+  return g;
+}
+
+/** Chains hanging from the ceiling (prison feel). */
+function makeChains(): THREE.Group {
+  const g = new THREE.Group();
+  const iron = matIron();
+  for (const off of [-0.32, 0.32]) {
+    for (let i = 0; i < 7; i++) {
+      const link = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.018, 5, 8), iron);
+      link.rotation.y = i % 2 === 0 ? 0 : Math.PI / 2;
+      link.position.set(off, 4.4 - i * 0.13, 0);
+      g.add(link);
+    }
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.02, 6, 10), iron);
+    ring.position.set(off, 3.42, 0);
+    g.add(ring);
+  }
+  return g;
+}
+
 
 /* ------------------------------------------------------------------ */
 /* Geometry helpers                                                    */
@@ -1248,6 +1353,21 @@ export class Hall3D {
         group.add(g);
       } else if (dc.kind === "rat") {
         ratSpots.push({ x: cx, z: cz });
+      } else if (dc.kind === "urn" || dc.kind === "barrel") {
+        const g = dc.kind === "urn" ? makeUrn() : makeBarrel();
+        g.position.set(cx, 0, cz);
+        g.rotation.y = (dc.x * 0.7 + dc.y * 1.9) % Math.PI;
+        group.add(g);
+        this.blocks.add(cellIdx(dc.x, dc.y));
+      } else if (dc.kind === "web") {
+        const g = makeCobweb();
+        g.position.set(cx, 0, cz);
+        g.rotation.y = (dc.x + dc.y) % Math.PI;
+        group.add(g);
+      } else if (dc.kind === "chain") {
+        const g = makeChains();
+        g.position.set(cx, 0, cz);
+        group.add(g);
       }
     }
 

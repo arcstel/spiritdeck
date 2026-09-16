@@ -272,7 +272,11 @@ export type DecorKind =
   | "table"
   | "gargoyle"
   | "skeleton"
-  | "rat";
+  | "rat"
+  | "urn"
+  | "barrel"
+  | "web"
+  | "chain";
 
 /** Decorative prop. For wall-mounted kinds, (x,y) is the wall cell and
  *  (dx,dy) points from the wall into the open room. */
@@ -285,7 +289,13 @@ export interface Decor {
 }
 
 /** Kinds the player cannot walk through (placed only in open rooms). */
-export const DECOR_BLOCKS: ReadonlySet<DecorKind> = new Set<DecorKind>(["fountain", "table", "gargoyle"]);
+export const DECOR_BLOCKS: ReadonlySet<DecorKind> = new Set<DecorKind>([
+  "fountain",
+  "table",
+  "gargoyle",
+  "urn",
+  "barrel",
+]);
 
 
 /**
@@ -478,7 +488,8 @@ export function generateDungeon(seed: number): Dungeon {
         tiles[my * w + mx] = TILE_DOOR;
         doors.push({ x: mx, y: my });
         prisonRects.push({ x: px, y: py });
-        return { x: px + 1, y: py + 1 };
+        if (tiles[(py + 1) * w + px + 1] === TILE_FLOOR) tiles[(py + 1) * w + px + 1] = TILE_CHEST;
+        return { x: px, y: py + 1 };
       }
     }
     return null;
@@ -565,6 +576,35 @@ export function generateDungeon(seed: number): Dungeon {
       }
     }
   }
+  const taken = new Set<number>();
+  for (const dc of decor) taken.add(dc.y * w + dc.x);
+  for (const r of mid) {
+    if (rng() < 0.5) {
+      const n = 1 + ri(3);
+      for (let i = 0; i < n; i++) {
+        const x = r.x + ri(r.w);
+        const y = r.y + ri(r.h);
+        const idx = y * w + x;
+        if (tiles[idx] !== TILE_FLOOR || taken.has(idx)) continue;
+        taken.add(idx);
+        decor.push({ kind: rng() < 0.5 ? "urn" : "barrel", x, y, dx: 0, dy: 0 });
+      }
+    }
+  }
+  for (const r of mid) {
+    if (rng() < 0.35) {
+      for (const [x, y] of [
+        [r.x, r.y],
+        [r.x + r.w - 1, r.y],
+        [r.x, r.y + r.h - 1],
+        [r.x + r.w - 1, r.y + r.h - 1],
+      ] as [number, number][]) {
+        if (tiles[y * w + x] === TILE_FLOOR && rng() < 0.5) decor.push({ kind: "web", x, y, dx: 0, dy: 0 });
+      }
+    }
+  }
+  for (const p of prisons) decor.push({ kind: "chain", x: p.x + 1, y: p.y, dx: 0, dy: 0 });
+
   // rats only in a couple of spots
   const ratRooms = mid.filter(() => rng() < 0.22).slice(0, 2);
   for (const r of ratRooms) {
