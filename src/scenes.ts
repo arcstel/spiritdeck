@@ -1,5 +1,6 @@
 import { Input, Scene } from "./engine";
 import { HallScene } from "./hall";
+import { VERSION } from "./version";
 import {
   DIR_VEC,
   Dungeon,
@@ -68,6 +69,7 @@ export class TitleScene implements Scene {
     textCenter(ctx, "a first-person deck-delve", 192, 84, C.dim, 8);
     if (Math.floor(this.t * 2) % 2 === 0) textCenter(ctx, "PRESS  ENTER", 192, 140, C.text, 8);
     textCenter(ctx, "arrows / WASD   M map   E foes   Z confirm   X cancel", 192, 198, C.dim, 8);
+    textCenter(ctx, VERSION, 256, 208, C.dim, 8);
   }
 }
 

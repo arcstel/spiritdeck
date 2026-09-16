@@ -11,6 +11,7 @@ import {
   TILE_DOOR,
   TILE_KEY,
   TILE_STAIRS,
+  TILE_VAULT,
   TILE_WALL,
   CardArt,
 } from "./data";
@@ -675,6 +676,7 @@ export function drawAutomap(
       if (t === TILE_BARS) col = "#3d4152";
       if (t === TILE_DOOR) col = "#8a6a2e";
       if (t === TILE_KEY) col = "#ffe08a";
+      if (t === TILE_VAULT) col = "#e8c15a";
       rect(ctx, ox + x * cell, oy + y * cell, Math.ceil(cell), Math.ceil(cell), col);
     }
   }

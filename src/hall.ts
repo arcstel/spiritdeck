@@ -12,6 +12,7 @@ import {
   TILE_DOOR,
   TILE_KEY,
   TILE_STAIRS,
+  TILE_VAULT,
   TILE_WALL,
   generateDungeon,
   isSolid,
@@ -20,6 +21,7 @@ import {
 import { Input, Scene, mulberry32 } from "./engine";
 import { C, drawAutomap, drawCompass, drawMemberCard, drawMessage, rect, text } from "./render";
 import type { Host } from "./scenes";
+import { VERSION } from "./version";
 
 const VIEW = { x: 80, y: 6, w: 224, h: 134 };
 const PANEL_W = 76;
@@ -507,6 +509,55 @@ function makeSkeleton(): THREE.Group {
   hand.position.set(0.06, 0.045, 0.62);
   g.add(hand);
   g.rotation.y = (Math.sin(g.position.x) + 1) * 2;
+  return g;
+}
+
+/** An ornate double vault door with gilt trim and a carved seal. */
+function makeVaultDoor(): THREE.Group {
+  const g = new THREE.Group();
+  const wood = new THREE.MeshStandardMaterial({ color: 0x3a2a17, roughness: 0.7, metalness: 0.1 });
+  const gold = matGold();
+  for (const s of [-1, 1]) {
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(1.42, 2.75, 0.2), wood);
+    leaf.position.set(s * 0.73, 1.38, 0);
+    g.add(leaf);
+    for (const y of [0.45, 1.38, 2.3]) {
+      const band = new THREE.Mesh(new THREE.BoxGeometry(1.46, 0.16, 0.26), gold);
+      band.position.set(s * 0.73, y, 0.03);
+      g.add(band);
+    }
+    const stud = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), gold);
+    stud.position.set(s * 0.73, 1.38, 0.16);
+    g.add(stud);
+  }
+  const sealRing = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.07, 8, 20), gold);
+  sealRing.position.set(0, 1.95, 0.18);
+  g.add(sealRing);
+  const seal = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.1, 8), wood);
+  seal.rotation.x = Math.PI / 2;
+  seal.position.set(0, 1.95, 0.16);
+  g.add(seal);
+  const keyhole = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.24, 0.06), matDark());
+  keyhole.position.set(0, 1.95, 0.22);
+  g.add(keyhole);
+  for (const s of [-1, 1]) {
+    const handle = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.03, 6, 12), gold);
+    handle.position.set(s * 0.5, 1.35, 0.2);
+    g.add(handle);
+    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.18, 3.2, 8), matStone());
+    pillar.position.set(s * 1.62, 1.6, 0);
+    g.add(pillar);
+    const grg = makeGargoyle();
+    grg.scale.set(0.62, 0.62, 0.62);
+    grg.position.set(s * 1.62, 3.2, 0.1);
+    g.add(grg);
+  }
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(3.7, 0.7, 0.5), matStone());
+  lintel.position.y = 3.1;
+  g.add(lintel);
+  const glow = new THREE.PointLight(0xffd27a, 4, 6, 2);
+  glow.position.set(0, 2.4, 0.5);
+  g.add(glow);
   return g;
 }
 
@@ -1342,6 +1393,12 @@ export class Hall3D {
           g.rotation.y = passageRot(gx, gy);
           group.add(g);
           this.doorMeshes.set(cellIdx(gx, gy), g);
+        } else if (t === TILE_VAULT) {
+          const g = makeVaultDoor();
+          g.position.set(cx, 0, cz);
+          g.rotation.y = passageRot(gx, gy);
+          group.add(g);
+          this.doorMeshes.set(cellIdx(gx, gy), g);
         }
       }
     }
@@ -1630,7 +1687,7 @@ export class Hall3D {
     const d = this.grid;
     if (!d) return false;
     const i = gy * d.w + gx;
-    if (d.tiles[i] !== TILE_DOOR) return false;
+    if (d.tiles[i] !== TILE_DOOR && d.tiles[i] !== TILE_VAULT) return false;
     d.tiles[i] = 0;
     const mesh = this.doorMeshes.get(i);
     if (mesh) {
@@ -1648,7 +1705,7 @@ export class Hall3D {
       const nx = gx + v.x;
       const ny = gy + v.y;
       if (nx < 0 || ny < 0 || nx >= d.w || ny >= d.h) continue;
-      if (d.tiles[ny * d.w + nx] === TILE_DOOR) return [nx, ny];
+      if (d.tiles[ny * d.w + nx] === TILE_DOOR || d.tiles[ny * d.w + nx] === TILE_VAULT) return [nx, ny];
     }
     return null;
   }
@@ -1842,5 +1899,6 @@ export class HallScene implements Scene {
     ]);
     text(ctx, this.showMap ? "[M] close map" : "[M] map", VIEW.x + 4, 141, C.dim, 8);
     text(ctx, this.enemies ? "[E] foes: on" : "[E] foes: off", VIEW.x + 74, 141, this.enemies ? C.dim : C.gold, 8);
+    text(ctx, VERSION, VIEW.x + VIEW.w - 34, 141, C.dim, 8);
   }
 }

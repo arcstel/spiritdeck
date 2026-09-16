@@ -259,10 +259,11 @@ export const TILE_STAIRS = 3;
 export const TILE_BARS = 4;
 export const TILE_DOOR = 5;
 export const TILE_KEY = 6;
+export const TILE_VAULT = 7;
 
 /** Tiles that block movement (and sight beyond, except bars which see through). */
 export function isSolid(t: number): boolean {
-  return t === TILE_WALL || t === TILE_BARS || t === TILE_DOOR;
+  return t === TILE_WALL || t === TILE_BARS || t === TILE_DOOR || t === TILE_VAULT;
 }
 
 export type DecorKind =
@@ -436,12 +437,14 @@ export function generateDungeon(seed: number): Dungeon {
 
   // vault door gating the stair room
   const vaultConn = connections[rooms.length - 2];
+  let vaultDoor: { x: number; y: number } | null = null;
   if (vaultConn) {
     for (const idx of vaultConn) {
       const x = idx % w;
       const y = (idx / w) | 0;
       if (inAnyRoom(x, y)) continue;
-      tiles[idx] = TILE_DOOR;
+      tiles[idx] = TILE_VAULT;
+      vaultDoor = { x, y };
       doors.push({ x, y });
       break;
     }
@@ -542,6 +545,20 @@ export function generateDungeon(seed: number): Dungeon {
     if (rng() < 0.28 && tiles[r.cy * w + r.cx] === TILE_FLOOR) tiles[r.cy * w + r.cx] = TILE_CHEST;
   }
 
+  // treasure room behind the vault door: the stair room is stacked with loot
+  {
+    let placed = 0;
+    for (let tries = 0; tries < 60 && placed < 4; tries++) {
+      const x = last.x + ri(last.w);
+      const y = last.y + ri(last.h);
+      const i = y * w + x;
+      if (tiles[i] !== TILE_FLOOR) continue;
+      if (Math.abs(x - last.cx) + Math.abs(y - last.cy) < 2) continue;
+      tiles[i] = TILE_CHEST;
+      placed++;
+    }
+  }
+
   const dungeon: Dungeon = { name: "Sunken Vault — B1", w, h, tiles, start };
   addAmbiance(dungeon, seed);
 
@@ -562,12 +579,32 @@ export function generateDungeon(seed: number): Dungeon {
         }
       }
     } else if (roll < 0.52) {
-      for (const [x, y] of [
-        [r.x, r.y],
-        [r.x + r.w - 1, r.y],
-      ] as [number, number][]) {
-        if (tiles[y * w + x] === TILE_FLOOR) decor.push({ kind: "gargoyle", x, y, dx: 0, dy: 0 });
+      // gargoyles flanking the room's corridor entry
+      let flanks: [number, number][] = [];
+      outer: for (let y = r.y; y < r.y + r.h; y++) {
+        for (let x = r.x; x < r.x + r.w; x++) {
+          for (const v of DIR_VEC) {
+            const nx = x + v.x;
+            const ny = y + v.y;
+            if (nx >= r.x && nx < r.x + r.w && ny >= r.y && ny < r.y + r.h) continue;
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+            if (isSolid(tiles[ny * w + nx]) || inAnyRoom(nx, ny)) continue;
+            const px = v.y;
+            const py = v.x;
+            const a: [number, number] = [x + px, y + py];
+            const b: [number, number] = [x - px, y - py];
+            const okA =
+              a[0] >= r.x && a[0] < r.x + r.w && a[1] >= r.y && a[1] < r.y + r.h && tiles[a[1] * w + a[0]] === TILE_FLOOR;
+            const okB =
+              b[0] >= r.x && b[0] < r.x + r.w && b[1] >= r.y && b[1] < r.y + r.h && tiles[b[1] * w + b[0]] === TILE_FLOOR;
+            if (okA && okB) {
+              flanks = [a, b];
+              break outer;
+            }
+          }
+        }
       }
+      for (const [x, y] of flanks) decor.push({ kind: "gargoyle", x, y, dx: 0, dy: 0 });
     } else if (roll < 0.8) {
       const n = 1 + ri(2);
       for (let i = 0; i < n; i++) {
@@ -577,6 +614,34 @@ export function generateDungeon(seed: number): Dungeon {
       }
     }
   }
+  // gargoyles flanking the vault door inside the treasure room
+  if (vaultDoor) {
+    for (let y = last.y; y < last.y + last.h; y++) {
+      for (let x = last.x; x < last.x + last.w; x++) {
+        const vx = vaultDoor.x - x;
+        const vy = vaultDoor.y - y;
+        if (Math.abs(vx) + Math.abs(vy) !== 1) continue;
+        const px = vy;
+        const py = vx;
+        for (const s of [1, -1]) {
+          const gx = x + px * s;
+          const gy = y + py * s;
+          if (
+            gx >= last.x &&
+            gx < last.x + last.w &&
+            gy >= last.y &&
+            gy < last.y + last.h &&
+            tiles[gy * w + gx] === TILE_FLOOR
+          ) {
+            decor.push({ kind: "gargoyle", x: gx, y: gy, dx: 0, dy: 0 });
+          }
+        }
+        y = last.y + last.h;
+        break;
+      }
+    }
+  }
+
   const taken = new Set<number>();
   for (const dc of decor) taken.add(dc.y * w + dc.x);
   for (const r of mid) {
