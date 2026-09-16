@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Heavy third-party kit assets (dev-only Blender bake inputs, not needed at runtime)
+assets/wall-kit/realistic/
+
+# Local scratch / secrets
+/tmp/
+*.token
