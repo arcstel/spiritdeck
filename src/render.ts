@@ -330,7 +330,18 @@ function frameImage(): HTMLImageElement | null {
       frameImg = im;
     };
     im.onerror = () => {
-      frameImg = null;
+      if (im.src.endsWith(".png")) {
+        const j = new Image();
+        j.onload = () => {
+          frameImg = j;
+        };
+        j.onerror = () => {
+          frameImg = null;
+        };
+        j.src = `${import.meta.env.BASE_URL}textures/portrait_frame.jpg`;
+      } else {
+        frameImg = null;
+      }
     };
     im.src = `${import.meta.env.BASE_URL}textures/portrait_frame.png`;
   }
