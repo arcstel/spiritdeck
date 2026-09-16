@@ -67,7 +67,7 @@ export class TitleScene implements Scene {
     textCenter(ctx, "S P I R I T D E C K", 192, 62, C.gold, 16);
     textCenter(ctx, "a first-person deck-delve", 192, 84, C.dim, 8);
     if (Math.floor(this.t * 2) % 2 === 0) textCenter(ctx, "PRESS  ENTER", 192, 140, C.text, 8);
-    textCenter(ctx, "arrows / WASD    M map    Z confirm    X cancel", 192, 198, C.dim, 8);
+    textCenter(ctx, "arrows / WASD   M map   E foes   Z confirm   X cancel", 192, 198, C.dim, 8);
   }
 }
 

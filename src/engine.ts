@@ -8,7 +8,8 @@ export type Action =
   | "right"
   | "confirm"
   | "cancel"
-  | "map";
+  | "map"
+  | "enemies";
 
 const KEYMAP: Record<string, Action> = {
   ArrowUp: "up",
@@ -25,6 +26,7 @@ const KEYMAP: Record<string, Action> = {
   Escape: "cancel",
   KeyX: "cancel",
   KeyM: "map",
+  KeyE: "enemies",
 };
 
 export class Input {

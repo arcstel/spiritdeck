@@ -597,16 +597,6 @@ export class Hall3D {
       color: 0xbdb6a8,
     });
     const ribCells: { x: number; z: number; rot: number }[] = [];
-    const openAt = (x: number, y: number): boolean =>
-      x >= 0 && y >= 0 && x < d.w && y < d.h && d.tiles[y * d.w + x] !== TILE_WALL;
-    const openness = (x: number, y: number): number => {
-      let c = 0;
-      if (openAt(x, y - 1)) c++;
-      if (openAt(x, y + 1)) c++;
-      if (openAt(x + 1, y)) c++;
-      if (openAt(x - 1, y)) c++;
-      return c;
-    };
     const torchCell = new Set<number>();
     for (const L of d.lights ?? []) torchCell.add(L.y * d.w + L.x);
     for (let gy = 0; gy < d.h; gy++) {
@@ -617,12 +607,10 @@ export class Hall3D {
         const e = !isWall(gx + 1, gy);
         const w = !isWall(gx - 1, gy);
         const i = gy * d.w + gx;
-        if (n && s2 && !(e && w)) {
-          if (openness(gx, gy - 1) >= 3 || openness(gx, gy + 1) >= 3 || torchCell.has(i))
-            ribCells.push({ x: gx * CS, z: gy * CS, rot: 0 });
-        } else if (e && w && !(n && s2)) {
-          if (openness(gx - 1, gy) >= 3 || openness(gx + 1, gy) >= 3 || torchCell.has(i))
-            ribCells.push({ x: gx * CS, z: gy * CS, rot: Math.PI / 2 });
+        if (n && s2 && !(e && w) && torchCell.has(i)) {
+          ribCells.push({ x: gx * CS, z: gy * CS, rot: 0 });
+        } else if (e && w && !(n && s2) && torchCell.has(i)) {
+          ribCells.push({ x: gx * CS, z: gy * CS, rot: Math.PI / 2 });
         }
       }
     }
@@ -886,6 +874,7 @@ export class HallScene implements Scene {
   private floor = 1;
   private seen: Uint8Array | null = null;
   private showMap = false;
+  private enemies = true;
   private msg: string[] = ["The Sunken Vault — B1. The air is cold and still."];
 
   constructor(private host: Host, private dungeon?: Dungeon) {
@@ -909,6 +898,10 @@ export class HallScene implements Scene {
 
   update(dt: number, input: Input): void {
     if (input.justPressed("map")) this.showMap = !this.showMap;
+    if (input.justPressed("enemies")) {
+      this.enemies = !this.enemies;
+      this.msg = [this.enemies ? "Wandering foes stir again." : "The halls lie quiet — no foes."];
+    }
 
     if (this.dungeon && !this.seen) this.seen = new Uint8Array(this.dungeon.w * this.dungeon.h);
     if (this.showMap) {
@@ -923,8 +916,10 @@ export class HallScene implements Scene {
       if (this.dist >= this.nextDist) {
         this.dist = 0;
         this.nextDist = 24 + Math.random() * 32;
-        void this.startEncounter();
-        return;
+        if (this.enemies) {
+          void this.startEncounter();
+          return;
+        }
       }
     }
     if (this.hall) {
@@ -1018,5 +1013,6 @@ export class HallScene implements Scene {
       `B${this.floor}    Gold ${this.host.gold}`,
     ]);
     text(ctx, this.showMap ? "[M] close map" : "[M] map", VIEW.x + 4, 141, C.dim, 8);
+    text(ctx, this.enemies ? "[E] foes: on" : "[E] foes: off", VIEW.x + 74, 141, this.enemies ? C.dim : C.gold, 8);
   }
 }
