@@ -357,7 +357,7 @@ function makeBars(span: number): THREE.Group {
   const iron = matIron();
   const n = Math.max(4, Math.round(span / 0.42));
   for (let i = 0; i < n; i++) {
-    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 3.5, 6), iron);
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 3.3, 6), iron);
     bar.position.set(-span / 2 + (i / (n - 1)) * span, 1.75, 0);
     g.add(bar);
   }
@@ -366,6 +366,34 @@ function makeBars(span: number): THREE.Group {
     rail.position.set(0, y, 0);
     g.add(rail);
   }
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(span + 0.5, 1.6, 0.5), matStone());
+  lintel.position.set(0, 3.95, 0);
+  g.add(lintel);
+  const sill = new THREE.Mesh(new THREE.BoxGeometry(span + 0.5, 0.36, 0.5), matStone());
+  sill.position.set(0, 0.18, 0);
+  g.add(sill);
+  return g;
+}
+
+/** A small barred window set into a wall. */
+function makeGrate(): THREE.Group {
+  const g = new THREE.Group();
+  const iron = matIron();
+  const recess = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.25, 0.12), matDark());
+  g.add(recess);
+  for (let i = 0; i < 4; i++) {
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 1.25, 6), iron);
+    bar.position.set(-0.36 + i * 0.24, 0, 0.06);
+    g.add(bar);
+  }
+  for (const y of [-0.42, 0.42]) {
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.06, 0.06), iron);
+    rail.position.set(0, y, 0.06);
+    g.add(rail);
+  }
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(1.16, 1.42, 0.08), matStone());
+  frame.position.z = -0.03;
+  g.add(frame);
   return g;
 }
 
@@ -1351,6 +1379,13 @@ export class Hall3D {
         g.position.set(fx, 2.1, fz);
         g.rotation.y = Math.atan2(dc.dx, dc.dy);
         group.add(g);
+      } else if (dc.kind === "grate") {
+        const fx = dc.x * CS + dc.dx * (CS / 2 - 0.06);
+        const fz = dc.y * CS + dc.dy * (CS / 2 - 0.06);
+        const g = makeGrate();
+        g.position.set(fx, 2.3, fz);
+        g.rotation.y = Math.atan2(dc.dx, dc.dy);
+        group.add(g);
       } else if (dc.kind === "rat") {
         ratSpots.push({ x: cx, z: cz });
       } else if (dc.kind === "urn" || dc.kind === "barrel") {
@@ -1554,7 +1589,16 @@ export class Hall3D {
   }
 
   private updateRats(dt: number): void {
+    const px = this.pos.x;
+    const pz = this.pos.z;
     for (const r of this.rats) {
+      const pdx = r.obj.position.x - px;
+      const pdz = r.obj.position.z - pz;
+      const near = Math.hypot(pdx, pdz) < 3.2;
+      if (near) {
+        r.tx = r.obj.position.x + pdx * 2;
+        r.tz = r.obj.position.z + pdz * 2;
+      }
       const dx = r.tx - r.obj.position.x;
       const dz = r.tz - r.obj.position.z;
       const dist = Math.hypot(dx, dz);
@@ -1569,7 +1613,7 @@ export class Hall3D {
           }
         }
       } else {
-        const step = Math.min(dist, r.speed * dt);
+        const step = Math.min(dist, r.speed * (near ? 2.1 : 1) * dt);
         r.obj.position.x += (dx / dist) * step;
         r.obj.position.z += (dz / dist) * step;
         const want = Math.atan2(dx, dz);

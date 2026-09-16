@@ -276,7 +276,8 @@ export type DecorKind =
   | "urn"
   | "barrel"
   | "web"
-  | "chain";
+  | "chain"
+  | "grate";
 
 /** Decorative prop. For wall-mounted kinds, (x,y) is the wall cell and
  *  (dx,dy) points from the wall into the open room. */
@@ -618,11 +619,12 @@ export function generateDungeon(seed: number): Dungeon {
   // skeletons slumped in some prison cells
   for (const p of prisons) decor.push({ kind: "skeleton", x: p.x, y: p.y, dx: 0, dy: 0 });
 
-  // old maps hanging on wall faces, avoiding torch spots
+  // old maps and barred windows on wall faces, avoiding torch spots
   const lightCell = new Set((dungeon.lights ?? []).map((L) => L.y * w + L.x));
   let maps = 0;
-  for (let y = 1; y < h - 1 && maps < 6; y++) {
-    for (let x = 1; x < w - 1 && maps < 6; x++) {
+  let grates = 0;
+  for (let y = 1; y < h - 1 && (maps < 6 || grates < 5); y++) {
+    for (let x = 1; x < w - 1; x++) {
       if (isSolid(tiles[y * w + x])) continue;
       for (const v of DIR_VEC) {
         const wx = x + v.x;
@@ -630,9 +632,15 @@ export function generateDungeon(seed: number): Dungeon {
         if (wx < 1 || wy < 1 || wx >= w - 1 || wy >= h - 1) continue;
         if (tiles[wy * w + wx] !== TILE_WALL) continue;
         if (lightCell.has(wy * w + wx)) continue;
-        if (rng() < 0.05) {
+        const r = rng();
+        if (maps < 6 && r < 0.05) {
           decor.push({ kind: "map", x: wx, y: wy, dx: -v.x, dy: -v.y });
           maps++;
+          break;
+        }
+        if (grates < 5 && r > 0.94) {
+          decor.push({ kind: "grate", x: wx, y: wy, dx: -v.x, dy: -v.y });
+          grates++;
           break;
         }
       }
