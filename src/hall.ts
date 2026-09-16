@@ -4,9 +4,9 @@ import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { DIR_VEC, Dungeon, TILE_WALL, rollEncounter } from "./data";
+import { DIR_VEC, Dungeon, TILE_CHEST, TILE_STAIRS, TILE_WALL, generateDungeon, rollEncounter } from "./data";
 import { Input, Scene, mulberry32 } from "./engine";
-import { C, drawCompass, drawMemberCard, drawMessage, rect, text } from "./render";
+import { C, drawAutomap, drawCompass, drawMemberCard, drawMessage, rect, text } from "./render";
 import type { Host } from "./scenes";
 
 const VIEW = { x: 80, y: 6, w: 224, h: 134 };
@@ -179,6 +179,7 @@ export class Hall3D {
   private gcs = 3.4;
   private lightPool: THREE.PointLight[] = [];
   private playerLight: THREE.PointLight | null = null;
+  private props: { obj: THREE.Object3D; gx: number; gy: number; type: "chest" | "stairs" }[] = [];
 
   constructor(private canvas: HTMLCanvasElement, private grid?: Dungeon) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
@@ -187,32 +188,7 @@ export class Hall3D {
     this.renderer.toneMappingExposure = 1.06;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
     this.camera = new THREE.PerspectiveCamera(70, 16 / 9, 0.05, 200);
-    if (this.grid) {
-      const g = this.grid;
-      const s = g.start;
-      this.pos.set(s.x * this.gcs, 1.62, s.y * this.gcs);
-      const openAt = (x: number, y: number): boolean =>
-        x >= 0 && y >= 0 && x < g.w && y < g.h && g.tiles[y * g.w + x] !== TILE_WALL;
-      const run = (dx: number, dy: number): number => {
-        let n = 0;
-        for (let k = 1; k < 16; k++) {
-          if (!openAt(s.x + dx * k, s.y + dy * k)) break;
-          n++;
-        }
-        return n;
-      };
-      let dir = s.dir;
-      let best = -1;
-      for (let dd = 0; dd < 4; dd++) {
-        const v = DIR_VEC[dd];
-        const r = run(v.x, v.y);
-        if (r > best) {
-          best = r;
-          dir = dd;
-        }
-      }
-      this.yaw = DIR_YAW[dir];
-    }
+    if (this.grid) this.placeAtStart(this.grid);
     this.camera.position.copy(this.pos);
     this.scene.fog = new THREE.FogExp2(0x05070c, 0.032);
     this.scene.background = new THREE.Color(0x04050a);
@@ -234,6 +210,67 @@ export class Hall3D {
       this.scene.add(this.playerLight);
     }
     this.ready = true;
+  }
+
+  private placeAtStart(g: Dungeon): void {
+    const s = g.start;
+    this.pos.set(s.x * this.gcs, 1.62, s.y * this.gcs);
+    const openAt = (x: number, y: number): boolean =>
+      x >= 0 && y >= 0 && x < g.w && y < g.h && g.tiles[y * g.w + x] !== TILE_WALL;
+    const run = (dx: number, dy: number): number => {
+      let n = 0;
+      for (let k = 1; k < 16; k++) {
+        if (!openAt(s.x + dx * k, s.y + dy * k)) break;
+        n++;
+      }
+      return n;
+    };
+    let dir = s.dir;
+    let best = -1;
+    for (let dd = 0; dd < 4; dd++) {
+      const v = DIR_VEC[dd];
+      const r = run(v.x, v.y);
+      if (r > best) {
+        best = r;
+        dir = dd;
+      }
+    }
+    this.yaw = DIR_YAW[dir];
+  }
+
+  /** Tear down the current floor and build a new one in place. */
+  reset(d: Dungeon): void {
+    for (const child of [...this.scene.children]) this.scene.remove(child);
+    this.flames = [];
+    this.props = [];
+    this.dust = null;
+    this.dustPos = null;
+    this.shaft = null;
+    this.lightPool = [];
+    this.playerLight = null;
+    this.grid = d;
+    this.placeAtStart(d);
+    this.build();
+    for (let i = 0; i < 14; i++) {
+      const l = new THREE.PointLight(0xffa860, 0, 6.5, 2);
+      this.scene.add(l);
+      this.lightPool.push(l);
+    }
+    this.playerLight = new THREE.PointLight(0xffe0b0, 2.8, 9.0, 2);
+    this.scene.add(this.playerLight);
+  }
+
+  cell(): [number, number] {
+    return [Math.round(this.pos.x / this.gcs), Math.round(this.pos.z / this.gcs)];
+  }
+
+  takeAt(gx: number, gy: number): "chest" | "stairs" | null {
+    const idx = this.props.findIndex((p) => p.gx === gx && p.gy === gy);
+    if (idx < 0) return null;
+    const p = this.props[idx];
+    this.scene.remove(p.obj);
+    this.props.splice(idx, 1);
+    return p.type;
   }
 
   private build(): void {
@@ -560,6 +597,18 @@ export class Hall3D {
       color: 0xbdb6a8,
     });
     const ribCells: { x: number; z: number; rot: number }[] = [];
+    const openAt = (x: number, y: number): boolean =>
+      x >= 0 && y >= 0 && x < d.w && y < d.h && d.tiles[y * d.w + x] !== TILE_WALL;
+    const openness = (x: number, y: number): number => {
+      let c = 0;
+      if (openAt(x, y - 1)) c++;
+      if (openAt(x, y + 1)) c++;
+      if (openAt(x + 1, y)) c++;
+      if (openAt(x - 1, y)) c++;
+      return c;
+    };
+    const torchCell = new Set<number>();
+    for (const L of d.lights ?? []) torchCell.add(L.y * d.w + L.x);
     for (let gy = 0; gy < d.h; gy++) {
       for (let gx = 0; gx < d.w; gx++) {
         if (isWall(gx, gy)) continue;
@@ -567,8 +616,14 @@ export class Hall3D {
         const s2 = !isWall(gx, gy + 1);
         const e = !isWall(gx + 1, gy);
         const w = !isWall(gx - 1, gy);
-        if (n && s2 && !(e && w)) ribCells.push({ x: gx * CS, z: gy * CS, rot: 0 });
-        else if (e && w && !(n && s2)) ribCells.push({ x: gx * CS, z: gy * CS, rot: Math.PI / 2 });
+        const i = gy * d.w + gx;
+        if (n && s2 && !(e && w)) {
+          if (openness(gx, gy - 1) >= 3 || openness(gx, gy + 1) >= 3 || torchCell.has(i))
+            ribCells.push({ x: gx * CS, z: gy * CS, rot: 0 });
+        } else if (e && w && !(n && s2)) {
+          if (openness(gx - 1, gy) >= 3 || openness(gx + 1, gy) >= 3 || torchCell.has(i))
+            ribCells.push({ x: gx * CS, z: gy * CS, rot: Math.PI / 2 });
+        }
       }
     }
     if (ribCells.length) {
@@ -626,6 +681,47 @@ export class Hall3D {
       group.add(flame);
       this.flames.push({ sprite: flame, phase: ti * 1.7, x, y: 2.86, z });
       ti++;
+    }
+
+    // chests and stairways
+    const chestMat = new THREE.MeshStandardMaterial({ color: 0x4a3520, roughness: 0.7, metalness: 0.1 });
+    const trimMat = new THREE.MeshStandardMaterial({ color: 0xc9a24a, roughness: 0.35, metalness: 0.9 });
+    const holeMat = new THREE.MeshBasicMaterial({ color: 0x05060a });
+    for (let gy = 0; gy < d.h; gy++) {
+      for (let gx = 0; gx < d.w; gx++) {
+        const t = d.tiles[gy * d.w + gx];
+        if (t !== TILE_CHEST && t !== TILE_STAIRS) continue;
+        const g = new THREE.Group();
+        if (t === TILE_CHEST) {
+          const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 0.55), chestMat);
+          body.position.y = 0.25;
+          g.add(body);
+          const lid = new THREE.Mesh(new THREE.BoxGeometry(0.84, 0.18, 0.6), chestMat);
+          lid.position.y = 0.56;
+          g.add(lid);
+          for (const zz of [-0.16, 0.16]) {
+            const band = new THREE.Mesh(new THREE.BoxGeometry(0.86, 0.54, 0.06), trimMat);
+            band.position.set(0, 0.28, zz);
+            g.add(band);
+          }
+          g.rotation.y = (gx * 1.7 + gy * 2.3) % Math.PI;
+          this.props.push({ obj: g, gx, gy, type: "chest" });
+        } else {
+          const rim = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.06, 1.5), wallMat);
+          rim.position.y = 0.02;
+          g.add(rim);
+          const hole = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.2), holeMat);
+          hole.rotation.x = -Math.PI / 2;
+          hole.position.y = 0.06;
+          g.add(hole);
+          const glow = new THREE.PointLight(0x8fb8ff, 3, 6, 2);
+          glow.position.set(0, 0.5, 0);
+          g.add(glow);
+          this.props.push({ obj: g, gx, gy, type: "stairs" });
+        }
+        g.position.set(gx * CS, 0, gy * CS);
+        group.add(g);
+      }
     }
 
     this.scene.add(new THREE.AmbientLight(0x243040, 0.6));
@@ -786,10 +882,15 @@ export class Hall3D {
 export class HallScene implements Scene {
   private hall: Hall3D | null = null;
   private dist = 0;
-  private nextDist = 12 + Math.random() * 16;
+  private nextDist = 24 + Math.random() * 32;
+  private floor = 1;
+  private seen: Uint8Array | null = null;
+  private showMap = false;
   private msg: string[] = ["The Sunken Vault — B1. The air is cold and still."];
 
-  constructor(private host: Host, private dungeon?: Dungeon) {}
+  constructor(private host: Host, private dungeon?: Dungeon) {
+    if (new URLSearchParams(location.search).get("map") === "1") this.showMap = true;
+  }
 
   glRender(viewEl: HTMLCanvasElement, uiCanvas: HTMLCanvasElement): void {
     if (!this.hall) {
@@ -801,24 +902,81 @@ export class HallScene implements Scene {
         return;
       }
     }
+    if (this.showMap) return;
     this.hall.layout(uiCanvas, VIEW);
     this.hall.render();
   }
 
   update(dt: number, input: Input): void {
+    if (input.justPressed("map")) this.showMap = !this.showMap;
+
+    if (this.dungeon && !this.seen) this.seen = new Uint8Array(this.dungeon.w * this.dungeon.h);
+    if (this.showMap) {
+      this.markSeen();
+      return;
+    }
+
     const moved = this.hall?.update(dt, input) ?? 0;
     if (moved > 0) {
+      this.markSeen();
       this.dist += moved;
       if (this.dist >= this.nextDist) {
         this.dist = 0;
-        this.nextDist = 12 + Math.random() * 16;
+        this.nextDist = 24 + Math.random() * 32;
         void this.startEncounter();
+        return;
+      }
+    }
+    if (this.hall) {
+      const [gx, gy] = this.hall.cell();
+      const what = this.hall.takeAt(gx, gy);
+      if (what === "chest") this.msg = [this.loot()];
+      else if (what === "stairs") this.descend();
+    }
+  }
+
+  private markSeen(): void {
+    if (!this.hall || !this.dungeon || !this.seen) return;
+    const [gx, gy] = this.hall.cell();
+    const R = 4;
+    for (let y = gy - R; y <= gy + R; y++) {
+      for (let x = gx - R; x <= gx + R; x++) {
+        if (x < 0 || y < 0 || x >= this.dungeon.w || y >= this.dungeon.h) continue;
+        if ((x - gx) * (x - gx) + (y - gy) * (y - gy) > R * R + 3) continue;
+        this.seen[y * this.dungeon.w + x] = 1;
       }
     }
   }
 
+  private loot(): string {
+    const roll = Math.random();
+    if (roll < 0.6) {
+      const g = 15 + ((Math.random() * 45) | 0);
+      this.host.gold += g;
+      return `A chest — ${g} gold glitters inside.`;
+    }
+    if (roll < 0.86) {
+      this.host.inventory.potion = (this.host.inventory.potion ?? 0) + 1;
+      return "A flask of amber draught.";
+    }
+    const m = this.host.party[(Math.random() * this.host.party.length) | 0];
+    m.atk += 1;
+    return `${m.name} finds an ember shard (+1 ATK).`;
+  }
+
+  private descend(): void {
+    this.floor++;
+    const d = generateDungeon((Math.random() * 1e9) | 0);
+    this.dungeon = d;
+    this.seen = new Uint8Array(d.w * d.h);
+    this.hall?.reset(d);
+    this.markSeen();
+    this.dist = 0;
+    this.msg = [`You descend the stair to B${this.floor}. The dark grows hungrier.`];
+  }
+
   private async startEncounter(): Promise<void> {
-    const size = Math.random() < 0.3 ? 3 : 2;
+    const size = Math.min(4, 2 + Math.floor((this.floor - 1) / 2) + (Math.random() < 0.3 ? 1 : 0));
     const monsters = rollEncounter((Math.random() * 1e9) | 0, size);
     const { BattleScene } = await import("./scenes");
     const scene = new BattleScene(this.host, monsters, (result) => {
@@ -838,6 +996,11 @@ export class HallScene implements Scene {
     rect(ctx, 0, 0, 384, 216, C.bg);
     ctx.clearRect(VIEW.x, VIEW.y, VIEW.w, VIEW.h);
 
+    if (this.showMap && this.dungeon && this.seen && this.hall) {
+      const [gx, gy] = this.hall.cell();
+      drawAutomap(ctx, this.dungeon, this.seen, gx, gy, this.hall.heading(), VIEW.x, VIEW.y, VIEW.w, VIEW.h);
+    }
+
     rect(ctx, VIEW.x - 2, VIEW.y - 2, VIEW.w + 4, 1, C.gold);
     rect(ctx, VIEW.x - 2, VIEW.y + VIEW.h + 1, VIEW.w + 4, 1, C.gold);
     rect(ctx, VIEW.x - 2, VIEW.y - 2, 1, VIEW.h + 4, C.gold);
@@ -849,7 +1012,11 @@ export class HallScene implements Scene {
     drawMemberCard(ctx, this.host.party[3], 308, 108, PANEL_W, 100, false);
 
     drawCompass(ctx, this.hall ? this.hall.heading() : 0, 192, 124);
-    drawMessage(ctx, VIEW.x, 150, VIEW.w, 62, [...this.msg, "", `Gold ${this.host.gold}`]);
-    text(ctx, "[M] map", VIEW.x + 4, 141, C.dim, 8);
+    drawMessage(ctx, VIEW.x, 150, VIEW.w, 62, [
+      ...this.msg,
+      "",
+      `B${this.floor}    Gold ${this.host.gold}`,
+    ]);
+    text(ctx, this.showMap ? "[M] close map" : "[M] map", VIEW.x + 4, 141, C.dim, 8);
   }
 }

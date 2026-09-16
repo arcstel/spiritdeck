@@ -178,7 +178,7 @@ export class DungeonScene implements Scene {
       return;
     }
 
-    if (ENCOUNTERS && sign > 0 && Math.random() < 0.16) {
+    if (ENCOUNTERS && sign > 0 && Math.random() < 0.08) {
       const size = Math.random() < 0.3 ? 3 : 2;
       const monsters = rollEncounter((Math.random() * 1e9) | 0, size);
       const battle = new BattleScene(this.host, monsters, (result) => {
