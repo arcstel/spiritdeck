@@ -17,6 +17,7 @@ import {
 } from "./data";
 import { makeCeilingTexture, makeFloorTexture, makeWallTexture, Tex } from "./textures";
 import { mulberry32 } from "./engine";
+import { track } from "./assets";
 import { MODEL_SIZE, getModelAtlas, modelSlot } from "./models";
 
 export const C = {
@@ -526,6 +527,67 @@ export function drawHoloBox(
 /* Party panel                                                         */
 /* ------------------------------------------------------------------ */
 
+/* Arte portraits: drop /textures/cards/<memberId>.jpg to replace a member's
+ * stats card with full-bleed art. */
+const cardImgs = new Map<string, HTMLImageElement | null>();
+
+function cardImage(id: string): HTMLImageElement | null {
+  if (cardImgs.has(id)) {
+    const im = cardImgs.get(id);
+    return im && im.complete && im.naturalWidth > 0 ? im : null;
+  }
+  const im = new Image();
+  cardImgs.set(id, im);
+  im.onload = () => cardImgs.set(id, im);
+  im.onerror = () => cardImgs.set(id, null);
+  im.src = `${import.meta.env.BASE_URL}textures/cards/${id}.jpg`;
+  return null;
+}
+
+/** Kick off card-art loads up front so the loading screen can wait for them. */
+export function preloadCardArt(ids: string[]): void {
+  for (const id of ids) {
+    if (cardImgs.has(id)) continue;
+    const done = track();
+    const im = new Image();
+    cardImgs.set(id, im);
+    im.onload = () => {
+      cardImgs.set(id, im);
+      done();
+    };
+    im.onerror = () => {
+      cardImgs.set(id, null);
+      done();
+    };
+    im.src = `${import.meta.env.BASE_URL}textures/cards/${id}.jpg`;
+  }
+}
+
+/** Draw an image filling the box (centre-cropped). */
+function drawCover(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+): void {
+  const ir = img.naturalWidth / img.naturalHeight;
+  const r = w / h;
+  let sx = 0;
+  let sy = 0;
+  let sw = img.naturalWidth;
+  let sh = img.naturalHeight;
+  if (ir > r) {
+    sw = img.naturalHeight * r;
+    sx = (img.naturalWidth - sw) / 2;
+  } else {
+    sh = img.naturalWidth / r;
+    sy = (img.naturalHeight - sh) / 2;
+  }
+  ctx.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+}
+
 export function drawMemberCard(
   ctx: CanvasRenderingContext2D,
   m: Member,
@@ -535,6 +597,15 @@ export function drawMemberCard(
   h: number,
   active: boolean
 ): void {
+  const art = cardImage(m.id);
+  if (art) {
+    frame(ctx, x, y, w, h, active ? C.panelHi : C.panel, active ? C.gold : C.bevelHi, C.bevelLo);
+    const prev = ctx.imageSmoothingEnabled;
+    ctx.imageSmoothingEnabled = true;
+    drawCover(ctx, art, x + 2, y + 2, w - 4, h - 4);
+    ctx.imageSmoothingEnabled = prev;
+    return;
+  }
   frame(ctx, x, y, w, h, active ? C.panelHi : C.panel, active ? C.gold : C.bevelHi, C.bevelLo);
   const portW = w - 8;
   const portH = Math.floor(h * 0.46);
