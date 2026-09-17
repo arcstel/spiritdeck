@@ -25,6 +25,8 @@ export class LoadingScene implements Scene {
   private t = 0;
   private waited = 0;
   private minShow: number;
+  private debug: boolean;
+  private frames = 0;
 
   constructor(
     private host: Sink,
@@ -32,17 +34,21 @@ export class LoadingScene implements Scene {
     private label = "L O A D I N G"
   ) {
     const q = new URLSearchParams(location.search);
-    this.minShow = Number(q.get("loadms") ?? 0) / 1000 || 0.35;
+    const ms = q.get("loadms");
+    this.minShow = ms === null ? 0.4 : Math.max(0, Number(ms) || 0) / 1000;
+    this.debug = q.get("loaddebug") === "1";
   }
 
   enter(): void {
     this.t = 0;
     this.waited = 0;
+    this.frames = 0;
   }
 
   update(dt: number): void {
     this.t += dt;
     this.waited += dt;
+    this.frames++;
     const waiting = this.waited < TIMEOUT;
 
     if (!this.built) {
@@ -66,7 +72,7 @@ export class LoadingScene implements Scene {
       (this.target as unknown as Warmable).preload?.();
       return;
     }
-    if (this.target && this.t >= this.minShow) this.host.setScene(this.target);
+    if (this.target && this.t >= this.minShow && this.frames > 3) this.host.setScene(this.target);
   }
 
   render(ctx: CanvasRenderingContext2D): void {
@@ -75,6 +81,10 @@ export class LoadingScene implements Scene {
     ctx.globalAlpha = a;
     textCenter(ctx, this.label, 192, 100, C.gold, 16);
     ctx.globalAlpha = 1;
+    if (this.debug) {
+      textCenter(ctx, `kits ${kitsReady() ? "ok" : "wait"}  assets ${assetsPending()}`, 192, 124, C.dim, 8);
+      textCenter(ctx, `phase ${this.phase}  ${(this.t).toFixed(1)}s`, 192, 134, C.dim, 8);
+    }
     textCenter(ctx, VERSION, 192, 210, C.dim, 8);
   }
 }

@@ -13,6 +13,8 @@ import {
   TILE_STAIRS,
   TILE_WALL,
   elementMult,
+  gearAtk,
+  gearDef,
   rollEncounter,
 } from "./data";
 import {
@@ -369,7 +371,7 @@ export class BattleScene implements Scene {
   private resolveAttack(atk: Member, targetIdx: number): void {
     const m = this.monsters[targetIdx];
     const mult = elementMult(atk.element, m.element);
-    const dmg = Math.max(1, Math.round((atk.atk * 2 - m.def) * mult * (0.9 + Math.random() * 0.2)));
+    const dmg = Math.max(1, Math.round((gearAtk(atk) * 2 - m.def) * mult * (0.9 + Math.random() * 0.2)));
     m.hp = Math.max(0, m.hp - dmg);
     this.flash[targetIdx] = 0.5;
     this.shake = 0.15;
@@ -387,7 +389,7 @@ export class BattleScene implements Scene {
           const m = this.monsters[i];
           if (m.hp <= 0) continue;
           const mult = elementMult(sp.element, m.element);
-          const dmg = Math.max(1, Math.round((sp.power + atk.atk) * mult));
+          const dmg = Math.max(1, Math.round((sp.power + gearAtk(atk)) * mult));
           m.hp = Math.max(0, m.hp - dmg);
           this.flash[i] = 0.5;
           if (m.hp <= 0) this.push([`${m.name} shatters into light.`]);
@@ -397,7 +399,7 @@ export class BattleScene implements Scene {
       } else {
         const m = this.monsters[targetIdx];
         const mult = elementMult(sp.element, m.element);
-        const dmg = Math.max(1, Math.round((sp.power + atk.atk) * mult));
+        const dmg = Math.max(1, Math.round((sp.power + gearAtk(atk)) * mult));
         m.hp = Math.max(0, m.hp - dmg);
         this.flash[targetIdx] = 0.6;
         this.shake = 0.18;
@@ -461,7 +463,7 @@ export class BattleScene implements Scene {
     const mult = elementMult(m.element, ally.element);
     const dmg = Math.max(
       1,
-      Math.round((m.atk * 2 - (ally.def + ally.guard)) * mult * (0.9 + Math.random() * 0.2))
+      Math.round((m.atk * 2 - (gearDef(ally) + ally.guard)) * mult * (0.9 + Math.random() * 0.2))
     );
     ally.hp = Math.max(0, ally.hp - dmg);
     this.shake = 0.18;

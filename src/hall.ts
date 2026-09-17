@@ -7,6 +7,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import {
   DIR_VEC,
   Dungeon,
+  Member,
   TILE_BARS,
   TILE_CHEST,
   TILE_DOOR,
@@ -20,6 +21,9 @@ import {
   generateTown,
   isSolid,
   rollEncounter,
+  rollGear,
+  equipGear,
+  gearOf,
   SPELLS,
 } from "./data";
 import { Input, Scene, mulberry32 } from "./engine";
@@ -28,6 +32,7 @@ import type { Host } from "./scenes";
 import { VERSION } from "./version";
 import { World, drawWorld, generateWorld } from "./worldmap";
 import { townModel } from "./townkit";
+import { hdModel } from "./townhd";
 import { gargoyleModel } from "./gargoylekit";
 import { track } from "./assets";
 import { LoadingScene } from "./loading";
@@ -844,6 +849,31 @@ function makeLamp(): THREE.Group {
   return g;
 }
 
+/** A low-poly park tree: tapered trunk + stacked foliage crowns. */
+function makeTree(variant: number): THREE.Group {
+  const g = new THREE.Group();
+  const trunkH = variant === 0 ? 1.5 : 2.4;
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.16, 0.26, trunkH, 7),
+    new THREE.MeshStandardMaterial({ color: 0x5a4326, roughness: 1 })
+  );
+  trunk.position.y = trunkH / 2;
+  g.add(trunk);
+  const leaves = [0x3f6b32, 0x4a7a38, 0x35602c];
+  const crowns = variant === 0 ? 2 : 3;
+  for (let i = 0; i < crowns; i++) {
+    const r = (variant === 0 ? 1.5 : 2.1) * (1 - i * 0.24);
+    const crown = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(r, 0),
+      new THREE.MeshStandardMaterial({ color: leaves[i % leaves.length], roughness: 1, flatShading: true })
+    );
+    crown.position.set((i - 1) * 0.22, trunkH + i * r * 0.72, (i % 2 ? 0.18 : -0.18));
+    crown.rotation.set(i, i * 1.7, 0);
+    g.add(crown);
+  }
+  return g;
+}
+
 function makeCrate(): THREE.Group {
   const g = new THREE.Group();
   const box = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.7, 0.7), matFlat(0x6a4a2a, 0.95));
@@ -1175,6 +1205,7 @@ export class Hall3D {
   /** Tear down the current floor and build a new one in place. */
   reset(d: Dungeon): void {
     this.kind = "dungeon";
+    this.renderer.shadowMap.enabled = false;
     this.gcs = 3.4;
     this.scene.fog = new THREE.FogExp2(0x05070c, 0.032);
     this.scene.background = new THREE.Color(0x04050a);
@@ -1282,31 +1313,69 @@ export class Hall3D {
 
   private buildTown(d: Dungeon): void {
     const CS = this.gcs;
-    this.scene.fog = new THREE.Fog(0xc3d6ea, 46, 180);
-    this.scene.background = new THREE.Color(0x9dc4e8);
-    this.renderer.toneMappingExposure = 1.12;
+    const CW = (d.w - 1) * CS; // town centre in world metres
+    this.scene.fog = new THREE.Fog(0xbcd2ea, 90, 300);
+    this.scene.background = new THREE.Color(0x9fc6ea);
+    this.renderer.toneMappingExposure = 0.98;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     const stone = new THREE.MeshStandardMaterial({
       map: phTex("cobblestone_floor_08_Diffuse.jpg", true, (d.w * CS) / 4, (d.h * CS) / 4),
       normalMap: phTex("cobblestone_floor_08_nor_gl.jpg", false, (d.w * CS) / 4, (d.h * CS) / 4),
       roughnessMap: phTex("cobblestone_floor_08_Rough.jpg", false, (d.w * CS) / 4, (d.h * CS) / 4),
       aoMap: phTex("cobblestone_floor_08_AO.jpg", false, (d.w * CS) / 4, (d.h * CS) / 4),
-      aoMapIntensity: 0.7,
+      aoMapIntensity: 0.75,
       roughness: 1,
       metalness: 0,
-      color: 0xb9b2a4,
+      color: 0xb2ab9c,
     });
     const gGeo = new THREE.PlaneGeometry(d.w * CS, d.h * CS).rotateX(-Math.PI / 2);
     uv1(gGeo);
     const ground = new THREE.Mesh(gGeo, stone);
-    ground.position.set(((d.w - 1) * CS) / 2, 0.01, ((d.h - 1) * CS) / 2);
+    ground.position.set(CW / 2, 0.01, CW / 2);
+    ground.receiveShadow = true;
     this.scene.add(ground);
 
-    this.scene.add(new THREE.AmbientLight(0x9fb4cc, 0.75));
-    this.scene.add(new THREE.HemisphereLight(0xbcd8ff, 0x6b5a3a, 1.05));
-    const sun = new THREE.DirectionalLight(0xfff1d4, 2.3);
-    sun.position.set(34, 56, -26);
-    sun.target.position.set(((d.w - 1) * CS) / 2, 0, ((d.h - 1) * CS) / 2);
+    // grass apron outside the walls so the fortifications do not float
+    const grass = new THREE.Mesh(
+      new THREE.PlaneGeometry(d.w * CS + 160, d.h * CS + 160).rotateX(-Math.PI / 2),
+      new THREE.MeshStandardMaterial({ color: 0x4d6b34, roughness: 1 })
+    );
+    grass.position.set(CW / 2, -0.02, CW / 2);
+    this.scene.add(grass);
+
+    // a pond in the south-east corner, with a bridge and a dock
+    const water = new THREE.Mesh(
+      new THREE.CircleGeometry(15, 40).rotateX(-Math.PI / 2),
+      new THREE.MeshStandardMaterial({
+        color: 0x2f6f93,
+        roughness: 0.18,
+        metalness: 0.35,
+        transparent: true,
+        opacity: 0.92,
+      })
+    );
+    water.position.set(CW / 2 + 50, 0.05, CW / 2 + 50);
+    this.scene.add(water);
+
+    this.scene.add(new THREE.AmbientLight(0xa9c0d8, 0.35));
+    this.scene.add(new THREE.HemisphereLight(0xcfe4ff, 0x5c4a2e, 0.55));
+    const sun = new THREE.DirectionalLight(0xfff0d0, 1.7);
+    sun.position.set(CW - 70, 120, CW - 90);
+    sun.target.position.set(CW / 2, 0, CW / 2);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    const sc = sun.shadow.camera as THREE.OrthographicCamera;
+    const R = 110;
+    sc.left = -R;
+    sc.right = R;
+    sc.top = R;
+    sc.bottom = -R;
+    sc.near = 1;
+    sc.far = 400;
+    sun.shadow.bias = -0.0006;
+    sun.shadow.normalBias = 0.6;
     this.scene.add(sun);
     this.scene.add(sun.target);
 
@@ -1316,14 +1385,44 @@ export class Hall3D {
       this.scene.add(obj);
     };
 
+    // footprint half-extents (metres) for collision, by model id
+    const FOOT: Record<string, [number, number]> = {
+      inn_hd: [5.1, 4.8],
+      tavern_hd: [4.4, 4.15],
+      blacksmith_open_forge_hd: [4.8, 3.8],
+      magic_library_shop_hd: [4.8, 4.2],
+      general_store_hd: [3.75, 3.9],
+      house_large_hd: [4.4, 3.9],
+      house_medium_hd: [3.75, 3.5],
+      house_small_hd: [3.1, 3.3],
+      food_stall_hd: [2.4, 1.9],
+      merchant_stall_hd: [2.4, 1.9],
+      cloth_stall_hd: [2.4, 1.9],
+      potion_stall_hd: [2.4, 1.9],
+      weapon_stall_hd: [2.4, 1.9],
+      accessories_stall_hd: [2.4, 1.9],
+      fruit_vegetable_stall_hd: [2.4, 1.9],
+      grand_royal_fountain_hd: [3.0, 3.0],
+      round_watchtower_hd: [2.3, 2.3],
+      crate_stack: [1.0, 0.8],
+      barrel_cluster: [1.0, 0.8],
+      cart: [1.0, 0.8],
+      hay_bale: [1.0, 0.8],
+      wood_fence: [1.0, 0.8],
+      tree_small: [0.5, 0.5],
+      tree_large: [0.6, 0.6],
+    };
+
     for (const dc of d.decor ?? []) {
       const rot = dc.rot ?? 0;
       const name = dc.model ?? "";
-      const m = name ? townModel(name) : null;
-      if (dc.kind === "gate") {
-        put(makeGateway({ halfW: 4.0, height: 3.3, depth: 2.4 }), dc.x, dc.y, rot);
-      } else if (m) {
+      const wx = dc.x * CS;
+      const wz = dc.y * CS;
+      const m = name ? (hdModel(name) ?? townModel(name)) : null;
+      if (m) {
         put(m, dc.x, dc.y, rot);
+      } else if (name === "tree_small" || name === "tree_large") {
+        put(makeTree(name === "tree_small" ? 0 : 1), dc.x, dc.y, rot);
       } else {
         if (dc.kind === "inn") put(makeHouse(7, 6, 4.5, 0xe8dcc0, 0x7a3a2a), dc.x, dc.y, rot);
         else if (dc.kind === "blacksmith") put(makeHouse(5.5, 5, 3.8, 0x8a7a68, 0x4a3a2a), dc.x, dc.y, rot);
@@ -1338,85 +1437,65 @@ export class Hall3D {
         } else if (dc.kind === "prop") put(makeCrate(), dc.x, dc.y, rot);
       }
 
-      if (
-        name === "inn_hd" ||
-        name === "blacksmith_hd" ||
-        name === "magic_shop_hd" ||
-        name === "inn" ||
-        name === "tavern" ||
-        name === "general_store" ||
-        name === "town_house_A" ||
-        name === "town_house_B"
-      ) {
-        const hd = name.endsWith("_hd");
+      const foot = FOOT[name];
+      if (foot) {
         const along = Math.abs(Math.cos(rot)) > 0.5;
-        const hx = hd ? 5.0 : 4.9;
-        const hz = hd ? 4.6 : 2.9;
-        this.blockRect(dc.x, dc.y, along ? hx : hz, along ? hz : hx);
-      } else if (name === "well" || name === "town_fountain") {
-        this.blockRect(dc.x, dc.y, 1.2, 1.2);
-      } else if (
-        name === "food_stall" ||
-        name === "merchant_stall" ||
-        name === "cloth_stall" ||
-        name === "potion_stall" ||
-        name === "general_goods_stall"
-      ) {
-        this.blockRect(dc.x, dc.y, 1.9, 1.4);
-      } else if (name === "cart" || name === "wood_fence" || name === "crate_stack" || name === "barrel_cluster" || name === "hay_bale") {
-        this.blockRect(dc.x, dc.y, 1.0, 0.8);
+        this.blockRect(dc.x, dc.y, along ? foot[0] : foot[1], along ? foot[1] : foot[0]);
       }
 
+      // signs + accents, oriented toward the plaza
+      const toward = Math.atan2(CW / 2 - wx, wz - CW / 2);
       if (dc.kind === "inn" && name) {
         const sign = makeSignBoard(name === "inn_hd" ? "INN" : "TAVERN");
-        sign.position.set(dc.x * CS + 3.2, 3.0, dc.y * CS + 3.2);
-        sign.rotation.y = -Math.PI / 4;
+        sign.position.set(wx + Math.sin(toward) * 6.4, 3.2, wz + Math.cos(toward) * 6.4);
+        sign.rotation.y = toward;
         this.scene.add(sign);
       }
       if (dc.kind === "blacksmith") {
         const sign = makeSignBoard("SMITH");
-        sign.position.set(dc.x * CS + 4.4, 3.2, dc.y * CS - 3.2);
-        sign.rotation.y = Math.PI / 4;
+        sign.position.set(wx + Math.sin(toward) * 6.0, 3.2, wz + Math.cos(toward) * 6.0);
+        sign.rotation.y = toward;
         this.scene.add(sign);
-        const forge = new THREE.PointLight(0xff5a1e, 9, 12, 2);
-        forge.position.set(dc.x * CS + 4.5, 1.6, dc.y * CS);
+        const forge = new THREE.PointLight(0xff5a1e, 9, 14, 2);
+        forge.position.set(wx + Math.sin(toward) * 5.0, 1.6, wz + Math.cos(toward) * 5.0);
         this.scene.add(forge);
         const anvil = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.24, 0.34), matIron());
-        anvil.position.set(dc.x * CS + 5.6, 0.7, dc.y * CS + 1.6);
+        anvil.position.set(wx + Math.sin(toward) * 6.2 + 0.9, 0.7, wz + Math.cos(toward) * 6.2);
+        anvil.castShadow = true;
         this.scene.add(anvil);
         const stump = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.36, 0.6, 10), matWood());
-        stump.position.set(dc.x * CS + 5.6, 0.3, dc.y * CS + 1.6);
+        stump.position.set(anvil.position.x, 0.3, anvil.position.z);
         this.scene.add(stump);
       }
       if (dc.kind === "magician") {
         const sign = makeSignBoard("MAGE");
-        sign.position.set(dc.x * CS - 4.4, 3.2, dc.y * CS - 3.2);
-        sign.rotation.y = -Math.PI / 4;
+        sign.position.set(wx + Math.sin(toward) * 6.0, 3.4, wz + Math.cos(toward) * 6.0);
+        sign.rotation.y = toward;
         this.scene.add(sign);
-        const glow = new THREE.PointLight(0x9a5aff, 8, 12, 2);
-        glow.position.set(dc.x * CS - 4.6, 2.0, dc.y * CS);
+        const glow = new THREE.PointLight(0x9a5aff, 9, 14, 2);
+        glow.position.set(wx + Math.sin(toward) * 5.2, 2.2, wz + Math.cos(toward) * 5.2);
         this.scene.add(glow);
         const crystalMat = new THREE.MeshStandardMaterial({
           color: 0x8a5cff,
           emissive: 0x6a3cff,
-          emissiveIntensity: 1.1,
+          emissiveIntensity: 1.2,
           roughness: 0.3,
           metalness: 0.1,
         });
-        for (const [ox, oz, sc] of [
-          [-5.2, 1.4, 1.0],
-          [-5.6, 0.2, 0.7],
-          [-4.9, -1.2, 0.85],
+        for (const [ox, oz, s] of [
+          [1.6, 0.6, 1.0],
+          [2.0, -0.5, 0.7],
+          [1.2, -1.4, 0.85],
         ] as [number, number, number][]) {
-          const c = new THREE.Mesh(new THREE.ConeGeometry(0.26 * sc, 1.1 * sc, 6), crystalMat);
-          c.position.set(dc.x * CS + ox, 0.55 * sc, dc.y * CS + oz);
-          c.rotation.z = (ox % 0.3) * 0.5;
+          const c = new THREE.Mesh(new THREE.ConeGeometry(0.28 * s, 1.2 * s, 6), crystalMat);
+          c.position.set(wx + Math.sin(toward) * 5.4 + ox, 0.6 * s, wz + Math.cos(toward) * 5.4 + oz);
+          c.castShadow = true;
           this.scene.add(c);
         }
       }
       if (dc.kind === "lamp") {
-        const l = new THREE.PointLight(0xffc070, 5, 12, 2);
-        l.position.set(dc.x * CS, 3.1, dc.y * CS);
+        const l = new THREE.PointLight(0xffc070, 4.5, 14, 2);
+        l.position.set(wx, 3.1, wz);
         this.scene.add(l);
       }
       if (dc.kind === "inn" || dc.kind === "blacksmith" || dc.kind === "magician" || dc.kind === "stall" || dc.kind === "well") {
@@ -2272,6 +2351,15 @@ export class Hall3D {
 
   render(): void {
     if (!this.ready) return;
+    this.camera.position.set(this.pos.x, 1.62, this.pos.z);
+    this.camera.rotation.set(0, this.yaw, 0);
+    if (new URLSearchParams(location.search).get("top") === "1" && this.grid) {
+      const cx = ((this.grid.w - 1) * this.gcs) / 2;
+      const cz = ((this.grid.h - 1) * this.gcs) / 2;
+      this.camera.position.set(cx, Math.max(this.grid.w, this.grid.h) * this.gcs * 0.8, cz + 0.01);
+      this.camera.lookAt(cx, 0, cz);
+      this.camera.updateMatrixWorld();
+    }
     this.composer.render();
   }
 }
@@ -2444,18 +2532,41 @@ export class HallScene implements Scene {
 
   private loot(): string {
     const roll = Math.random();
-    if (roll < 0.6) {
-      const g = 15 + ((Math.random() * 45) | 0);
+    if (roll < 0.42) {
+      const g = 15 + ((Math.random() * 45) | 0) + this.floor * 6;
       this.host.gold += g;
       return `A chest — ${g} gold glitters inside.`;
     }
-    if (roll < 0.86) {
+    if (roll < 0.6) {
       this.host.inventory.potion = (this.host.inventory.potion ?? 0) + 1;
       return "A flask of amber draught.";
     }
-    const m = this.host.party[(Math.random() * this.host.party.length) | 0];
-    m.atk += 1;
-    return `${m.name} finds an ember shard (+1 ATK).`;
+    if (roll < 0.68) {
+      const m = this.host.party[(Math.random() * this.host.party.length) | 0];
+      m.atk += 1;
+      return `${m.name} finds an ember shard (+1 ATK).`;
+    }
+    // gear: hand the drop to whoever gains the most from it
+    const g = rollGear(this.floor);
+    let best: Member | null = null;
+    let bestBonus = Infinity;
+    for (const m of this.host.party) {
+      const b = gearOf(m, g.kind)?.tier ?? 0;
+      if (b < bestBonus) {
+        bestBonus = b;
+        best = m;
+      }
+    }
+    if (!best) return "The chest is empty.";
+    const current = gearOf(best, g.kind);
+    if (current && current.tier >= g.tier) {
+      this.host.gold += g.value;
+      return `A ${g.name} — lesser than ${best.name}'s ${current.name}. Sold for ${g.value} gold.`;
+    }
+    equipGear(best, g);
+    const bonus = g.kind === "weapon" ? `+${g.atk} ATK` : `+${g.def} DEF`;
+    const swapped = current ? ` (replacing ${current.name})` : "";
+    return `${best.name} equips the ${g.name} — ${bonus}${swapped}.`;
   }
 
   private descend(): void {

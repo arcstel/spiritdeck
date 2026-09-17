@@ -1,5 +1,6 @@
 import { gargoyleReady } from "./gargoylekit";
 import { townKitReady } from "./townkit";
+import { townHdReady } from "./townhd";
 
 /**
  * A tiny global counter of in-flight asset loads (textures, etc). Scenes call
@@ -24,5 +25,5 @@ export function assetsPending(): number {
 
 /** True once the async model kits have finished loading (or given up). */
 export function kitsReady(): boolean {
-  return townKitReady() && gargoyleReady();
+  return townKitReady() && gargoyleReady() && townHdReady();
 }

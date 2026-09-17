@@ -120,7 +120,7 @@ export function startLoop(
 ): void {
   let last = performance.now();
   const tick = (now: number) => {
-    const dt = Math.min(0.05, (now - last) / 1000);
+    const dt = Math.min(0.05, Math.max(0, (now - last) / 1000));
     last = now;
     update(dt);
     render();

@@ -107,6 +107,8 @@ export interface Member {
   guard: number;
   spells: string[];
   art: PortraitKind;
+  weapon?: string;
+  armor?: string;
 }
 
 export type PortraitKind = "warrior" | "mage" | "cleric" | "spirit";
@@ -226,6 +228,76 @@ export const ITEMS: Record<string, { name: string; kind: "heal" | "mp"; power: n
   draught: { name: "Cinder Draught", kind: "heal", power: 25 },
   dew: { name: "Spirit Dew", kind: "mp", power: 10 },
 };
+
+/* ------------------------------------------------------------------ */
+/* Gear — weapons and armour found in chests                            */
+/* ------------------------------------------------------------------ */
+
+export interface Gear {
+  id: string;
+  name: string;
+  kind: "weapon" | "armor";
+  atk: number;
+  def: number;
+  tier: number;
+  value: number;
+}
+
+export const GEAR: Gear[] = [
+  // tier 1
+  { id: "bronze_gladius", name: "Bronze Gladius", kind: "weapon", atk: 3, def: 0, tier: 1, value: 20 },
+  { id: "leather_jerkin", name: "Leather Jerkin", kind: "armor", atk: 0, def: 2, tier: 1, value: 18 },
+  { id: "ash_buckler", name: "Ash Buckler", kind: "armor", atk: 0, def: 3, tier: 1, value: 22 },
+  // tier 2
+  { id: "iron_falchion", name: "Iron Falchion", kind: "weapon", atk: 6, def: 0, tier: 2, value: 55 },
+  { id: "smith_hammer", name: "Warden's Hammer", kind: "weapon", atk: 5, def: 1, tier: 2, value: 60 },
+  { id: "chain_hauberk", name: "Chain Hauberk", kind: "armor", atk: 0, def: 5, tier: 2, value: 58 },
+  // tier 3
+  { id: "steel_warblade", name: "Steel Warblade", kind: "weapon", atk: 10, def: 0, tier: 3, value: 120 },
+  { id: "emberfang", name: "Emberfang", kind: "weapon", atk: 9, def: 0, tier: 3, value: 130 },
+  { id: "scale_mail", name: "Scale Mail", kind: "armor", atk: 0, def: 8, tier: 3, value: 115 },
+  // tier 4
+  { id: "runed_claymore", name: "Runed Claymore", kind: "weapon", atk: 15, def: 0, tier: 4, value: 240 },
+  { id: "frostbrand", name: "Frostbrand", kind: "weapon", atk: 14, def: 1, tier: 4, value: 250 },
+  { id: "runeplate", name: "Runeplate", kind: "armor", atk: 0, def: 12, tier: 4, value: 235 },
+  // tier 5
+  { id: "duskrend", name: "Duskrend", kind: "weapon", atk: 22, def: 0, tier: 5, value: 480 },
+  { id: "dragonhide", name: "Dragonhide Coat", kind: "armor", atk: 0, def: 17, tier: 5, value: 470 },
+  // tier 6
+  { id: "starcleaver", name: "Starcleaver", kind: "weapon", atk: 30, def: 2, tier: 6, value: 900 },
+  { id: "aegis_plate", name: "Aegis Plate", kind: "armor", atk: 0, def: 24, tier: 6, value: 880 },
+];
+
+export const GEAR_BY_ID: Record<string, Gear> = Object.fromEntries(GEAR.map((g) => [g.id, g]));
+
+/** A gear drop suited to the depth reached. */
+export function rollGear(floor: number, rng: () => number = Math.random): Gear {
+  const maxTier = Math.min(6, Math.floor((floor + 2) / 3) + 1);
+  const minTier = Math.max(1, maxTier - 2);
+  const tier = minTier + Math.floor(rng() * (maxTier - minTier + 1));
+  const pool = GEAR.filter((g) => g.tier === tier);
+  return pool[Math.floor(rng() * pool.length)];
+}
+
+export function gearOf(m: Member, kind: "weapon" | "armor"): Gear | null {
+  const id = kind === "weapon" ? m.weapon : m.armor;
+  return id ? GEAR_BY_ID[id] ?? null : null;
+}
+
+/** Attack including any equipped weapon. */
+export function gearAtk(m: Member): number {
+  return m.atk + (gearOf(m, "weapon")?.atk ?? 0);
+}
+
+/** Defence including any equipped armour. */
+export function gearDef(m: Member): number {
+  return m.def + (gearOf(m, "armor")?.def ?? 0);
+}
+
+export function equipGear(m: Member, g: Gear): void {
+  if (g.kind === "weapon") m.weapon = g.id;
+  else m.armor = g.id;
+}
 
 /** A wall-mounted torch: cell of the wall, plus the normal facing into the room. */
 export interface TorchLight {
@@ -789,12 +861,13 @@ export function generateDungeon(seed: number): Dungeon {
 }
 
 /**
- * A small walled town: an open cobbled grid (all walkable) with a boundary
- * wall, a central plaza, and buildings/stalls laid out as decor props.
+ * A sprawling walled market town built from the HD town + fortification kits.
+ * The grid stays coarse (for collision and movement); the decorative props are
+ * placed at metre precision so the layout can breathe.
  */
 export function generateTown(seed: number): Dungeon {
-  const w = 15;
-  const h = 15;
+  const w = 41;
+  const h = 41;
   const tiles = new Uint8Array(w * h).fill(TILE_FLOOR);
   const rng = mulberry32(seed);
   for (let x = 0; x < w; x++) {
@@ -807,70 +880,181 @@ export function generateTown(seed: number): Dungeon {
   }
 
   const decor: Decor[] = [];
-  const add = (kind: DecorKind, x: number, y: number, model: string, rot = 0) =>
-    decor.push({ kind, x, y, dx: 0, dy: 0, model, rot });
+  // metre-space placement helpers (buildTown multiplies cells by CS = 4 m)
+  const M = 4;
+  const add = (kind: DecorKind, xm: number, zm: number, model: string, rot = 0) =>
+    decor.push({ kind, x: xm / M, y: zm / M, dx: 0, dy: 0, model, rot });
 
   const cx = Math.floor(w / 2);
-  const cy = Math.floor(h / 2);
+  const C = cx * M; // 80 m — town centre
+  const E = (h - 1) * M; // 160 m — wall line (outer edge)
+  const WALL = M * 0.5; // 2 m
 
-  // perimeter walls (skip the south-centre gate)
-  for (let x = 1; x < w - 1; x += 2) {
-    add("wall", x, 0, "town_wall_straight", 0);
-    if (x !== cx) add("wall", x, h - 1, "town_wall_straight", 0);
+  // ---- fortification perimeter -------------------------------------------
+  const span = E - WALL; // 158 m between the corner posts
+  const seg = 5.89;
+  const n = Math.max(1, Math.round(span / seg));
+  const gateGap = 7; // metres cleared either side of a gate
+  for (let i = 0; i <= n; i++) {
+    const t = WALL + (span * i) / n;
+    if (Math.abs(t - C) > gateGap) {
+      add("wall", t, WALL, "wall_straight_hd", 0);
+      add("wall", t, E, "wall_straight_hd", 0);
+    }
+    if (Math.abs(t - C) > gateGap) {
+      add("wall", WALL, t, "wall_straight_hd", Math.PI / 2);
+      add("wall", E, t, "wall_straight_hd", Math.PI / 2);
+    }
   }
-  add("gate", cx, h - 1, "town_wall_gate", Math.PI);
-  for (let y = 1; y < h - 1; y += 2) {
-    add("wall", 0, y, "town_wall_straight", Math.PI / 2);
-    add("wall", w - 1, y, "town_wall_straight", Math.PI / 2);
-  }
-
-  // buildings facing the plaza
-  add("inn", cx - 4, 2, "inn_hd", 0);
-  add("inn", cx + 4, 2, "town_house_A", Math.PI);
-  add("blacksmith", 2, cy, "blacksmith_hd", Math.PI / 2);
-  add("magician", w - 3, cy, "magic_shop_hd", -Math.PI / 2);
-  add("prop", cx - 4, h - 3, "town_house_A", 0);
-  add("prop", cx + 4, h - 3, "town_house_A", rng() < 0.5 ? 0 : Math.PI);
-  add("prop", 2, 3, "town_house_A", Math.PI / 2 + (rng() < 0.5 ? 0 : Math.PI));
-  add("prop", w - 3, 3, "town_house_A", -Math.PI / 2);
-
-  // market stalls on the plaza edge
-  add("stall", cx - 2, cy - 3, "food_stall", Math.PI);
-  add("stall", cx + 2, cy - 3, "merchant_stall", Math.PI);
-  add("stall", cx - 3, cy, "cloth_stall", Math.PI / 2);
-  add("stall", cx + 3, cy, "potion_stall", -Math.PI / 2);
-  add("stall", cx + 1, cy + 3, "general_goods_stall", 0);
-  add("stall", cx - 3, cy + 2, "food_stall", Math.PI / 2);
-
-  // plaza centrepiece (dry fountain)
-  add("well", cx, cy, "town_fountain");
-
-  // street furniture
-  for (const [x, y] of [
-    [cx - 3, cy - 3],
-    [cx + 3, cy - 3],
-    [cx - 3, cy + 3],
-    [cx + 3, cy + 3],
-    [cx, cy - 4],
-    [cx, cy + 4],
+  for (const [x, z] of [
+    [WALL, WALL],
+    [E, WALL],
+    [E, E],
+    [WALL, E],
   ] as [number, number][]) {
-    add("lamp", x, y, "lamp_post");
+    add("wall", x, z, "wall_corner_hd", 0);
   }
-  add("crate", cx - 2, cy + 4, "crate_stack");
-  add("crate", cx + 2, cy + 4, "barrel_cluster");
-  add("prop", cx - 4, cy + 2, "hay_bale");
-  add("prop", cx + 4, cy + 3, "wood_fence", 0);
-  add("prop", cx - 4, cy - 2, "wood_fence", 0);
-  add("prop", cx + 4, cy - 3, "cart", 0.4);
-  add("prop", cx - 2, h - 2, "signpost");
-  add("prop", cx - 2, 2, "signpost");
+  for (const [x, z] of [
+    [WALL + 9, WALL + 9],
+    [E - 9, WALL + 9],
+    [E - 9, E - 9],
+    [WALL + 9, E - 9],
+  ] as [number, number][]) {
+    add("prop", x, z, "round_watchtower_hd", 0);
+  }
+  // south gate leads out to the world map; north gate back to the vault
+  add("gate", C, E, "gate_open_hd", Math.PI);
+  add("gate", C, WALL, "gate_open_hd", 0);
 
-  // south gate back out to the world map
+  const facing = (x: number, z: number) => Math.atan2(-(C - x), -(C - z));
+
+  // ---- grand plaza: paving, fountain, balustrade, arcade ------------------
+  const pave = 8.0;
+  for (let ix = -2; ix <= 2; ix++) {
+    for (let iz = -2; iz <= 2; iz++) {
+      if (ix === 0 && iz === 0) continue; // fountain sits here
+      add("prop", C + ix * pave, C + iz * pave, "castle_courtyard_plaza_hd", 0);
+    }
+  }
+  add("well", C, C, "grand_royal_fountain_hd", rng() * Math.PI);
+  for (const [dx, dz, r] of [
+    [0, -7, 0],
+    [0, 7, 0],
+    [-7, 0, Math.PI / 2],
+    [7, 0, Math.PI / 2],
+  ] as [number, number, number][]) {
+    add("prop", C + dx, C + dz, "courtyard_balustrade_hd", r);
+  }
+  for (const [dx, dz, r] of [
+    [-17, -17, Math.PI / 4],
+    [17, -17, -Math.PI / 4],
+    [-17, 17, (3 * Math.PI) / 4],
+    [17, 17, (-3 * Math.PI) / 4],
+  ] as [number, number, number][]) {
+    add("prop", C + dx, C + dz, "courtyard_arcade_hd", r);
+  }
+
+  // ---- cobbled roads from the gates to the plaza --------------------------
+  const roadZ = (x: number, from: number, to: number) => {
+    const steps = Math.max(1, Math.round(Math.abs(to - from) / 4.31));
+    for (let i = 0; i <= steps; i++) add("prop", x, from + ((to - from) * i) / steps, "cobble_straight_hd", 0);
+  };
+  roadZ(C, C + 20, E - 8);
+  roadZ(C, C - 20, WALL + 8);
+  const roadX = (z: number, from: number, to: number) => {
+    const steps = Math.max(1, Math.round(Math.abs(to - from) / 4.31));
+    for (let i = 0; i <= steps; i++) add("prop", from + ((to - from) * i) / steps, z, "cobble_straight_hd", Math.PI / 2);
+  };
+  roadX(C, C + 20, E - 10);
+  roadX(C, C - 20, WALL + 10);
+
+  // ---- buildings ringing the plaza (fronts turned inward) ----------------
+  const buildings: [DecorKind, string, number, number][] = [
+    ["inn", "inn_hd", C, C - 40],
+    ["inn", "tavern_hd", C - 31, C - 31],
+    ["blacksmith", "blacksmith_open_forge_hd", C + 34, C - 12],
+    ["magician", "magic_library_shop_hd", C + 24, C - 38],
+    ["stall", "general_store_hd", C - 34, C - 8],
+    ["prop", "house_large_hd", C + 30, C + 30],
+    ["prop", "house_medium_hd", C - 40, C + 20],
+    ["prop", "house_small_hd", C - 12, C - 44],
+    ["prop", "house_small_hd", C - 22, C + 44],
+    ["prop", "house_medium_hd", C + 46, C - 20],
+    ["prop", "house_large_hd", C - 52, C + 40],
+    ["prop", "house_medium_hd", C + 52, C + 40],
+    ["prop", "house_small_hd", C + 40, C + 8],
+    ["prop", "house_small_hd", C - 44, C - 34],
+  ];
+  for (const [kind, model, x, z] of buildings) add(kind, x, z, model, facing(x, z));
+
+  // ---- market: two dense clusters of stalls ------------------------------
+  const stalls: [string, number, number][] = [
+    ["food_stall_hd", C - 9, C - 13],
+    ["fruit_vegetable_stall_hd", C + 9, C - 13],
+    ["merchant_stall_hd", C - 17, C - 4],
+    ["cloth_stall_hd", C + 17, C - 4],
+    ["potion_stall_hd", C - 17, C + 9],
+    ["accessories_stall_hd", C + 17, C + 9],
+    ["weapon_stall_hd", C - 8, C + 16],
+    ["merchant_stall_hd", C + 8, C + 16],
+    // second market lane by the south gate
+    ["food_stall_hd", C - 6, C + 30],
+    ["fruit_vegetable_stall_hd", C + 6, C + 30],
+    ["merchant_stall_hd", C - 13, C + 38],
+    ["cloth_stall_hd", C + 13, C + 38],
+    ["potion_stall_hd", C - 6, C + 46],
+    ["accessories_stall_hd", C + 6, C + 46],
+  ];
+  for (const [model, x, z] of stalls) add("stall", x, z, model, facing(x, z));
+
+  // ---- street furniture & clutter ----------------------------------------
+  for (let a = 0; a < 12; a++) {
+    const ang = (a / 12) * Math.PI * 2;
+    add("lamp", C + Math.cos(ang) * 21, C + Math.sin(ang) * 21, "lamp_post");
+  }
+  for (const [x, z, m, r] of [
+    [C - 22, C + 22, "crate_stack", 0.3],
+    [C + 22, C + 22, "barrel_cluster", 0],
+    [C + 22, C - 22, "cart", 0.8],
+    [C - 22, C - 22, "cart", 1.9],
+    [C + 30, C + 2, "hay_bale", 0],
+    [C - 30, C - 14, "hay_bale", 0.5],
+    [C + 26, C + 30, "wood_fence", 0.3],
+    [C - 26, C + 34, "wood_fence", 1.2],
+    [C + 3, C - 24, "signpost", 0.6],
+    [C - 3, C + 24, "signpost", -0.6],
+    [C - 48, C - 30, "crate_stack", 0.2],
+    [C + 48, C + 16, "barrel_cluster", 0.7],
+    [C - 36, C + 36, "cart", 0.4],
+    [C + 36, C - 36, "hay_bale", 1.0],
+    [C + 56, C + 56, "barrel_cluster", 0.1],
+    [C - 56, C + 8, "crate_stack", 0.9],
+  ] as [number, number, string, number][]) {
+    add("prop", x, z, m, r);
+  }
+
+  // ---- a pond in the south-east, with bridge + dock -----------------------
+  const PX = C + 50;
+  const PZ = C + 50;
+  add("prop", PX, PZ, "stone_arch_bridge_hd", Math.PI / 4);
+  add("prop", PX - 8, PZ + 8, "waterfront_dock_hd", Math.PI / 4);
+  add("prop", PX + 8, PZ - 10, "wooden_bridge_hd", Math.PI / 4);
+
+  // ---- trees: ring belts around the plaza and along the walls ------------
+  for (let i = 0; i < 160; i++) {
+    const x = WALL + 7 + rng() * (E - WALL - 14);
+    const z = WALL + 7 + rng() * (E - WALL - 14);
+    const d = Math.hypot(x - C, z - C);
+    if (d < 26) continue; // keep the plaza clear
+    if (d > 70 && rng() < 0.55) continue; // thin out the far fields
+    add("prop", x, z, rng() < 0.65 ? "tree_small" : "tree_large", rng() * Math.PI * 2);
+  }
+
+  // south gate back out to the world map; north road into the vault
   tiles[(h - 2) * w + cx] = TILE_EXIT;
-  // north road (marked) straight back down into the dungeon
   tiles[1 * w + cx] = TILE_EXIT2;
 
-  const start = { x: cx, y: h - 3, dir: 0 };
+  const start = { x: cx, y: h - 6, dir: 0 };
   return { name: "Market Town", w, h, tiles, start, decor, kind: "town" };
 }
 

@@ -6,6 +6,7 @@ import { LoadingScene } from "./loading";
 import { View3D, ViewState } from "./view3d";
 import { initModelAtlas, renderModelAtlas } from "./models";
 import { loadTownKit } from "./townkit";
+import { loadTownHd } from "./townhd";
 import { loadGargoyleKit } from "./gargoylekit";
 
 /** A fixed cross-shaped corridor used only to eyeball the renderer. */
@@ -26,6 +27,7 @@ const gc = new GameCanvas(canvasEl);
 const input = new Input();
 initModelAtlas();
 loadTownKit();
+loadTownHd();
 loadGargoyleKit();
 
 const params = new URLSearchParams(location.search);
@@ -53,13 +55,13 @@ const host: Host = {
 
 let current: Scene;
 if (mode === "hall") {
-  current = new HallScene(host);
+  current = new LoadingScene(host, () => new HallScene(host));
 } else if (mode === "floor") {
-  current = new HallScene(host, host.dungeon);
+  current = new LoadingScene(host, () => new HallScene(host, host.dungeon));
 } else if (mode === "world") {
-  current = new HallScene(host, host.dungeon);
+  current = new LoadingScene(host, () => new HallScene(host, host.dungeon));
 } else if (mode === "town") {
-  current = new HallScene(host);
+  current = new LoadingScene(host, () => new HallScene(host));
 } else if (mode === "loading") {
   current = new LoadingScene(host, () => new HallScene(host, host.dungeon));
 } else if (mode === "dungeon" || mode === "testroom") {
