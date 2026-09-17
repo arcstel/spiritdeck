@@ -984,8 +984,37 @@ export function generateTown(seed: number): Dungeon {
     ["prop", "house_medium_hd", C + 52, C + 40],
     ["prop", "house_small_hd", C + 40, C + 8],
     ["prop", "house_small_hd", C - 44, C - 34],
+    ["prop", "house_large_hd", C + 62, C + 18],
+    ["prop", "house_medium_hd", C - 62, C - 8],
+    ["prop", "house_small_hd", C - 8, C - 62],
+    ["prop", "house_medium_hd", C + 12, C + 62],
+    ["prop", "house_small_hd", C - 62, C + 44],
+    ["prop", "house_large_hd", C + 62, C + 56],
+    ["prop", "house_small_hd", C + 34, C - 58],
+    ["prop", "house_medium_hd", C - 30, C - 60],
+    ["prop", "house_small_hd", C + 58, C - 40],
+    ["prop", "house_medium_hd", C - 60, C + 58],
   ];
+  // an outer ring of homes, fronts turned to the plaza
+  for (let a = 0; a < 10; a++) {
+    const ang = (a / 10) * Math.PI * 2 + 0.31;
+    const r = 66 + rng() * 6;
+    buildings.push([
+      "prop",
+      rng() < 0.55 ? "house_small_hd" : rng() < 0.8 ? "house_medium_hd" : "house_large_hd",
+      C + Math.cos(ang) * r,
+      C + Math.sin(ang) * r,
+    ]);
+  }
   for (const [kind, model, x, z] of buildings) add(kind, x, z, model, facing(x, z));
+
+  // lamps marching along the four roads
+  for (const t of [C + 30, C + 44, C + 58, C - 30, C - 44, C - 58]) {
+    add("lamp", C - 3, t, "lamp_post");
+    add("lamp", C + 3, t, "lamp_post");
+    add("lamp", t, C - 3, "lamp_post");
+    add("lamp", t, C + 3, "lamp_post");
+  }
 
   // ---- market: two dense clusters of stalls ------------------------------
   const stalls: [string, number, number][] = [
@@ -1040,15 +1069,36 @@ export function generateTown(seed: number): Dungeon {
   add("prop", PX - 8, PZ + 8, "waterfront_dock_hd", Math.PI / 4);
   add("prop", PX + 8, PZ - 10, "wooden_bridge_hd", Math.PI / 4);
 
-  // ---- trees: ring belts around the plaza and along the walls ------------
-  for (let i = 0; i < 160; i++) {
-    const x = WALL + 7 + rng() * (E - WALL - 14);
-    const z = WALL + 7 + rng() * (E - WALL - 14);
-    const d = Math.hypot(x - C, z - C);
-    if (d < 26) continue; // keep the plaza clear
-    if (d > 70 && rng() < 0.55) continue; // thin out the far fields
-    add("prop", x, z, rng() < 0.65 ? "tree_small" : "tree_large", rng() * Math.PI * 2);
+  // ---- trees: only off the streets, behind walls and buildings -----------
+  // Trees are solid, so they must never land in a walkable lane.
+  const treeSpots: [number, number][] = [];
+  const blocked = (x: number, z: number): boolean =>
+    Math.abs(x - C) < 8 ||
+    Math.abs(z - C) < 8 ||
+    (Math.abs(x - C) < 7 && z < WALL + 16 && z > 0) ||
+    (Math.abs(x - C) < 7 && z > E - 16) ||
+    (Math.abs(z - C) < 7 && x < WALL + 16) ||
+    (Math.abs(z - C) < 7 && x > E - 16) ||
+    buildings.some(([, , bx, bz]) => Math.hypot(x - bx, z - bz) < 11) ||
+    stalls.some(([, bx, bz]) => Math.hypot(x - bx, z - bz) < 8) ||
+    Math.hypot(x - (C + 50), z - (C + 50)) < 24;
+  // scattered copses in the outer fields
+  for (let i = 0; i < 1200 && treeSpots.length < 130; i++) {
+    const x = WALL + 6 + rng() * (E - WALL - 12);
+    const z = WALL + 6 + rng() * (E - WALL - 12);
+    if (Math.hypot(x - C, z - C) < 38) continue;
+    if (blocked(x, z)) continue;
+    treeSpots.push([x, z]);
   }
+  // a treeline hugging the inside of the walls (never in front of a gate)
+  for (let t = WALL + 9; t <= E - 9; t += 6.5) {
+    if (Math.abs(t - C) < 14) continue;
+    treeSpots.push([t + (rng() - 0.5) * 2, WALL + 4.5 + rng() * 2]);
+    treeSpots.push([t + (rng() - 0.5) * 2, E - 4.5 - rng() * 2]);
+    treeSpots.push([WALL + 4.5 + rng() * 2, t + (rng() - 0.5) * 2]);
+    treeSpots.push([E - 4.5 - rng() * 2, t + (rng() - 0.5) * 2]);
+  }
+  for (const [x, z] of treeSpots) add("prop", x, z, rng() < 0.6 ? "tree_small" : "tree_large", rng() * Math.PI * 2);
 
   // south gate back out to the world map; north road into the vault
   tiles[(h - 2) * w + cx] = TILE_EXIT;
